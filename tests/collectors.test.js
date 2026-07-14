@@ -1,0 +1,264 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import assert from "node:assert/strict";
+import { usageFromClaudeStatusLine } from "../dist/claude.js";
+import { collectCodexUsage } from "../dist/codex.js";
+import { usageFromMinimaxQuota } from "../dist/minimax.js";
+
+test("usageFromClaudeStatusLine normalizes status line rate limits", () => {
+  const usage = usageFromClaudeStatusLine({
+    rate_limits: {
+      five_hour: { used_percentage: 42, resets_at: "2026-05-08T02:00:00Z" },
+      seven_day: { used_percentage: 18, resets_at: "2026-05-12T00:00:00Z" },
+    },
+  });
+
+  assert.equal(usage.provider, "claude");
+  assert.equal(usage.windows[0].usedPercent, 42);
+  assert.equal(usage.windows[1].windowMinutes, 10080);
+});
+
+test("usageFromClaudeStatusLine rejects missing usage", () => {
+  assert.throws(() => usageFromClaudeStatusLine({}), /rate_limits/);
+});
+
+test("collectCodexUsage reads latest payload.rate_limits from jsonl", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-codex-"));
+  fs.mkdirSync(path.join(dir, "sessions"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "sessions", "rollout.jsonl"),
+    [
+      JSON.stringify({
+        timestamp: "2026-05-08T00:00:00.000Z",
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          rate_limits: {
+            primary: { used_percent: 12, window_minutes: 300, resets_at: 1778205600 },
+            secondary: { used_percent: 34, window_minutes: 10080, resets_at: 1778544000 },
+            plan_type: "pro",
+          },
+        },
+      }),
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const usage = collectCodexUsage(dir);
+  assert.equal(usage.provider, "codex");
+  assert.equal(usage.planType, "pro");
+  assert.equal(usage.windows[0].usedPercent, 12);
+});
+
+test("collectCodexUsage prefers the latest 7d-only payload over an older dual-window payload", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-codex-"));
+  fs.mkdirSync(path.join(dir, "sessions"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "sessions", "rollout.jsonl"),
+    [
+      JSON.stringify({
+        timestamp: "2026-07-13T01:28:26.961Z",
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          rate_limits: {
+            primary: { used_percent: 49, window_minutes: 300, resets_at: 1783828214 },
+            secondary: { used_percent: 8, window_minutes: 10080, resets_at: 1784511014 },
+            plan_type: "prolite",
+          },
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-07-14T01:50:43.493Z",
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          rate_limits: {
+            primary: { used_percent: 52, window_minutes: 10080, resets_at: 1784510416 },
+            secondary: null,
+            plan_type: "prolite",
+          },
+        },
+      }),
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const usage = collectCodexUsage(dir);
+  assert.equal(usage.observedAt, "2026-07-14T01:50:43.493Z");
+  assert.deepEqual(usage.windows.map((window) => window.name), ["seven_day"]);
+  assert.equal(usage.windows[0].usedPercent, 52);
+});
+
+test("collectCodexUsage accepts numeric-string window_minutes from the latest payload", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-codex-"));
+  fs.mkdirSync(path.join(dir, "sessions"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "sessions", "rollout.jsonl"),
+    `${JSON.stringify({
+      timestamp: "2026-07-14T01:50:43.493Z",
+      payload: {
+        rate_limits: {
+          primary: { used_percent: 52, window_minutes: "10080", resets_at: 1784510416 },
+          secondary: null,
+          plan_type: "prolite",
+        },
+      },
+    })}\n`,
+    "utf8",
+  );
+
+  const usage = collectCodexUsage(dir);
+  assert.deepEqual(usage.windows.map((window) => window.name), ["seven_day"]);
+  assert.equal(usage.windows[0].windowMinutes, 10080);
+});
+
+test("collectCodexUsage ignores non-session jsonl files", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-codex-"));
+  fs.mkdirSync(path.join(dir, "sessions"), { recursive: true });
+  fs.mkdirSync(path.join(dir, ".tmp", "plugins"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, ".tmp", "plugins", "fixture.jsonl"),
+    `${JSON.stringify({
+      timestamp: "2026-05-09T00:00:00.000Z",
+      payload: {
+        rate_limits: {
+          primary: { used_percent: 99, window_minutes: 300, resets_at: 1778205600 },
+          secondary: { used_percent: 99, window_minutes: 10080, resets_at: 1778544000 },
+        },
+      },
+    })}\n`,
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(dir, "sessions", "rollout.jsonl"),
+    `${JSON.stringify({
+      timestamp: "2026-05-08T00:00:00.000Z",
+      payload: {
+        rate_limits: {
+          primary: { used_percent: 12, window_minutes: 300, resets_at: 1778205600 },
+          secondary: { used_percent: 34, window_minutes: 10080, resets_at: 1778544000 },
+        },
+      },
+    })}\n`,
+    "utf8",
+  );
+
+  const usage = collectCodexUsage(dir);
+  assert.equal(usage.windows[0].usedPercent, 12);
+});
+
+test("usageFromMinimaxQuota derives percent from remaining when total_count is 0", () => {
+  // Real MiniMax /v1/token_plan/remains response shape: `general` model has
+  // total_count=0 (credit-based plan) and exposes remaining_percent only.
+  const usage = usageFromMinimaxQuota({
+    model_remains: [
+      {
+        model_name: "general",
+        start_time: 1780297200000,
+        end_time: 1780315200000,
+        remains_time: 16138310,
+        current_interval_total_count: 0,
+        current_interval_usage_count: 0,
+        current_interval_remaining_percent: 98,
+        current_weekly_total_count: 0,
+        current_weekly_usage_count: 0,
+        current_weekly_remaining_percent: 99,
+        weekly_start_time: 1780243200000,
+        weekly_end_time: 1780848000000,
+        weekly_remains_time: 548938310,
+      },
+      {
+        model_name: "video",
+        start_time: 1780243200000,
+        end_time: 1780329600000,
+        remains_time: 30538310,
+        current_interval_total_count: 3,
+        current_interval_usage_count: 0,
+        current_weekly_total_count: 21,
+        current_weekly_usage_count: 0,
+        current_weekly_remaining_percent: 100,
+        weekly_start_time: 1780243200000,
+        weekly_end_time: 1780848000000,
+        weekly_remains_time: 548938310,
+      },
+    ],
+    base_resp: { status_code: 0, status_msg: "success" },
+  }, { source: "https://api.minimaxi.com/v1/token_plan/remains" });
+
+  assert.ok(usage, "expected usage to be returned");
+  assert.equal(usage.provider, "minimax");
+  assert.equal(usage.planType, "general", "should pick `general` over first model");
+  const fiveHour = usage.windows.find((w) => w.name === "five_hour");
+  const sevenDay = usage.windows.find((w) => w.name === "seven_day");
+  assert.equal(fiveHour.usedPercent, 2, "5h used = 100 - 98");
+  assert.equal(sevenDay.usedPercent, 1, "7d used = 100 - 99");
+});
+
+test("usageFromMinimaxQuota uses count ratio when total_count > 0", () => {
+  // A subscription that does report counts (e.g. a free tier with a call cap).
+  const usage = usageFromMinimaxQuota({
+    model_remains: [
+      {
+        model_name: "general",
+        start_time: 1780297200000,
+        end_time: 1780315200000,
+        remains_time: 16138310,
+        current_interval_total_count: 10,
+        current_interval_usage_count: 4,
+        current_interval_remaining_percent: 60,
+        current_weekly_total_count: 100,
+        current_weekly_usage_count: 25,
+        current_weekly_remaining_percent: 75,
+        weekly_start_time: 1780243200000,
+        weekly_end_time: 1780848000000,
+        weekly_remains_time: 548938310,
+      },
+    ],
+    base_resp: { status_code: 0, status_msg: "success" },
+  }, { source: "https://api.minimaxi.com/v1/token_plan/remains" });
+
+  const fiveHour = usage.windows.find((w) => w.name === "five_hour");
+  const sevenDay = usage.windows.find((w) => w.name === "seven_day");
+  assert.equal(fiveHour.usedPercent, 40, "5h used = 4/10 * 100, count takes precedence");
+  assert.equal(sevenDay.usedPercent, 25, "7d used = 25/100 * 100");
+});
+
+test("usageFromMinimaxQuota falls back to 0 when neither count nor percent is reported", () => {
+  const usage = usageFromMinimaxQuota({
+    model_remains: [
+      {
+        model_name: "general",
+        start_time: 1780297200000,
+        end_time: 1780315200000,
+        remains_time: 16138310,
+        current_interval_total_count: 0,
+        current_interval_usage_count: 0,
+        current_weekly_total_count: 0,
+        current_weekly_usage_count: 0,
+        weekly_start_time: 1780243200000,
+        weekly_end_time: 1780848000000,
+        weekly_remains_time: 548938310,
+      },
+    ],
+    base_resp: { status_code: 0, status_msg: "success" },
+  }, { source: "https://api.minimaxi.com/v1/token_plan/remains" });
+
+  const fiveHour = usage.windows.find((w) => w.name === "five_hour");
+  const sevenDay = usage.windows.find((w) => w.name === "seven_day");
+  assert.equal(fiveHour.usedPercent, 0);
+  assert.equal(sevenDay.usedPercent, 0);
+});
+
+test("usageFromMinimaxQuota rejects empty model_remains", () => {
+  const usage = usageFromMinimaxQuota({
+    model_remains: [],
+    base_resp: { status_code: 0, status_msg: "success" },
+  }, { source: "https://api.minimaxi.com/v1/token_plan/remains" });
+
+  assert.equal(usage, null);
+});

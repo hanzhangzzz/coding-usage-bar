@@ -1,0 +1,58 @@
+{
+  "name": "coding-usage-bar",
+  "version": "0.1.0",
+  "description": "macOS menu bar usage monitor for Claude Code, Codex, GLM, DeepSeek, and MiniMax.",
+  "author": "hanzhangzzz",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hanzhangzzz/coding-usage-bar.git"
+  },
+  "homepage": "https://github.com/hanzhangzzz/coding-usage-bar#readme",
+  "bugs": {
+    "url": "https://github.com/hanzhangzzz/coding-usage-bar/issues"
+  },
+  "keywords": [
+    "claude-code",
+    "codex",
+    "openai",
+    "anthropic",
+    "macos",
+    "menu-bar",
+    "ai-coding",
+    "coding-plan",
+    "usage-monitor",
+    "quota-monitor",
+    "rate-limit",
+    "swiftbar",
+    "burn-rate"
+  ],
+  "type": "module",
+  "bin": {
+    "coding-usage-bar": "./dist/cli.js"
+  },
+  "files": [
+    "assets",
+    "docs/assets/hero.png",
+    "dist",
+    "fixtures",
+    "README.md",
+    "README.zh-CN.md"
+  ],
+  "scripts": {
+    "build": "tsc && chmod +x dist/cli.js",
+    "test": "npm run build && node --test tests/*.test.js",
+    "clean": "rm -rf dist",
+    "prepack": "npm run build"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "os": [
+    "darwin"
+  ],
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
+}

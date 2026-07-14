@@ -1,0 +1,20 @@
+{
+  "provider": "claude",
+  "source": "fixture",
+  "observedAt": "2026-05-08T00:00:00.000Z",
+  "planType": null,
+  "windows": [
+    {
+      "name": "five_hour",
+      "windowMinutes": 300,
+      "usedPercent": 25,
+      "resetsAt": "2026-05-08T02:00:00.000Z"
+    },
+    {
+      "name": "seven_day",
+      "windowMinutes": 10080,
+      "usedPercent": 35,
+      "resetsAt": "2026-05-12T00:00:00.000Z"
+    }
+  ]
+}

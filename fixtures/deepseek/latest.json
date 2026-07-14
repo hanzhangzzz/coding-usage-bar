@@ -1,0 +1,12 @@
+{
+  "provider": "deepseek",
+  "source": "https://api.deepseek.com/user/balance",
+  "observedAt": "2026-05-19T12:00:00.000Z",
+  "planType": null,
+  "windows": [],
+  "balance": {
+    "total": "37.87",
+    "currency": "CNY",
+    "isAvailable": true
+  }
+}
