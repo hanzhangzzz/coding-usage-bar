@@ -22,6 +22,7 @@ test("maybePromptForStar asks once and stars Coding Usage Bar when accepted", ()
   const messages = maybePromptForStar(paths, {
     dryRun: false,
     isInteractive: true,
+    env: {},
     canStarWithGh: true,
     confirmStar: (prompt) => {
       prompts.push(prompt);
@@ -41,6 +42,7 @@ test("maybePromptForStar asks once and stars Coding Usage Bar when accepted", ()
   maybePromptForStar(paths, {
     dryRun: false,
     isInteractive: true,
+    env: {},
     confirmStar: () => {
       throw new Error("should not prompt twice");
     },
@@ -57,6 +59,7 @@ test("maybePromptForStar records declined prompts without calling gh", () => {
   const messages = maybePromptForStar(paths, {
     dryRun: false,
     isInteractive: true,
+    env: {},
     canStarWithGh: true,
     confirmStar: () => false,
     starRepo: () => {
@@ -121,6 +124,7 @@ test("maybePromptForStar retries when the previous star attempt failed", () => {
   maybePromptForStar(paths, {
     dryRun: false,
     isInteractive: true,
+    env: {},
     canStarWithGh: true,
     confirmStar: () => {
       prompted = true;
