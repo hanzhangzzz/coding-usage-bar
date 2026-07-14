@@ -50,4 +50,4 @@ npm pack
 
 [MIT](LICENSE)
 
-各 Provider 名称与商标归其权利人所有。本项目独立开发，与 Anthropic、OpenAI、智谱 AI、DeepSeek、MiniMax 无隶属或背书关系；发布包使用 macOS 系统符号，不再分发 Provider logo。
+各 Provider 名称与商标归其权利人所有。本项目独立开发，与 Anthropic、OpenAI、智谱 AI、DeepSeek、MiniMax 无隶属或背书关系。Provider 标识仅用于识别，不适用项目 MIT License，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

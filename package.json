@@ -37,7 +37,8 @@
     "dist",
     "fixtures",
     "README.md",
-    "README.zh-CN.md"
+    "README.zh-CN.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "build": "tsc && chmod +x dist/cli.js",

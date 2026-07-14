@@ -113,8 +113,8 @@ test("renderMenuBar outputs SwiftBar-compatible status text", () => {
   assert.match(output, /^ \| image=[A-Za-z0-9+/=]+,[A-Za-z0-9+/=]+ width=\d+ height=22 dropdown=false tooltip=5H:0%,7D:35%\\ │\\ 5H:31%,7D:69%/);
   assert.match(output, /\n---\n/);
   assert.match(output, /Coding Usage Bar \| color=#111827,#F9FAFB size=15 sfimage=flame\.fill/);
-  assert.match(output, /Codex  Low \| sfimage=curlybraces\.square\.fill color=#111827,#F9FAFB size=14/);
-  assert.match(output, /Claude  Fast \| sfimage=sparkles color=#111827,#F9FAFB size=14/);
+  assert.match(output, /Codex  Low \| image=[A-Za-z0-9+/=]+ color=#111827,#F9FAFB size=14/);
+  assert.match(output, /Claude  Fast \| image=[A-Za-z0-9+/=]+ color=#111827,#F9FAFB size=14/);
   assert.match(output, /5h[^\n]*0%[^\n]*reset/);
   assert.match(output, /7d[^\n]*35%[^\n]*reset/);
   assert.match(output, /WARNING  Claude not connected \| color=#FF9F0A,#FFD60A size=13 sfimage=exclamationmark\.triangle\.fill/);
@@ -122,7 +122,7 @@ test("renderMenuBar outputs SwiftBar-compatible status text", () => {
   assert.doesNotMatch(output, /shortcut=/);
 });
 
-test("renderMenuBar title keeps provider usage bars scoped to their segments", () => {
+test("renderMenuBar title keeps provider icons scoped to their usage segments", () => {
   const output = renderMenuBar(snapshot);
   const titleLine = output.split("\n")[0];
   const imageParam = titleLine.match(/image=([^ ]+)/)?.[1];
@@ -134,7 +134,7 @@ test("renderMenuBar title keeps provider usage bars scoped to their segments", (
   for (const encodedImage of imageParam.split(",")) {
     const image = pngInfoFromBase64(encodedImage);
     assert.equal(image.height, 44);
-    assert.ok(image.width > 200, "title image should include both provider segments at 2x");
+    assert.ok(image.width > 240, "title image should include both provider segments at 2x");
     assert.ok(image.width < 520, "title image should stay within normal menu bar width at 2x");
   }
 });

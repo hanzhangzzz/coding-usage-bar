@@ -20,9 +20,18 @@ const STATE_LABEL: Record<BurnState, string> = {
   LIMIT_RISK: "Limit",
 };
 
-// Use system symbols so the package does not redistribute third-party logos.
-const PROVIDER_ICON_ASSET: Record<string, string> = {};
-const PROVIDER_ICON_DARK_ASSET: Record<string, string> = {};
+// Local provider marks keep SwiftBar rendering offline; see THIRD_PARTY_NOTICES.md.
+const PROVIDER_ICON_ASSET: Record<string, string> = {
+  claude: "provider-claude.png",
+  codex: "provider-codex.png",
+  glm: "provider-glm.png",
+  deepseek: "provider-deepseek.png",
+  minimax: "provider-minimax.png",
+};
+
+const PROVIDER_ICON_DARK_ASSET: Record<string, string> = {
+  glm: "provider-glm-dark.png",
+};
 
 const PROVIDER_ICON_FALLBACK: Record<string, string> = {
   claude: "sparkles",
@@ -31,6 +40,8 @@ const PROVIDER_ICON_FALLBACK: Record<string, string> = {
   deepseek: "bubble.left.and.bubble.right",
   minimax: "waveform.path.ecg",
 };
+
+const TITLE_ICON_ASSET = "provider-marks.png";
 
 const ALERT_COLOR = "#D97757,#E8956E";
 const WARNING_COLOR = "#FF9F0A,#FFD60A";
@@ -629,6 +640,10 @@ function providerIconParams(provider: string) {
 }
 
 function titleIconParams() {
+  const image = imageAssetBase64(TITLE_ICON_ASSET);
+  if (image) {
+    return { image };
+  }
   return { sfimage: "flame.fill", sfcolor: RAW_COLOR };
 }
 

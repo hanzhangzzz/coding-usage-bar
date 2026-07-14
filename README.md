@@ -153,7 +153,7 @@ coding-usage-bar menubar install
 
 If SwiftBar is not installed, `coding-usage-bar doctor` will report it. If SwiftBar already has a custom plugin folder, Coding Usage Bar uses that folder.
 
-The compact menu bar title shows each provider's rolling-window bars; the dropdown uses macOS system symbols for Codex, Claude Code, Zhipu AI, DeepSeek, and MiniMax (DeepSeek shows balance instead of windows):
+The compact menu bar title and dropdown use recognizable Provider marks for Codex, Claude Code, Zhipu AI, DeepSeek, and MiniMax alongside the rolling-window data (DeepSeek shows balance instead of windows):
 
 ```text
 {Codex icon} 5H:14%,7D:67% │ {Claude icon} 5H:24%,7D:74% │ {GLM icon} 5H:36%,7D:7%
@@ -217,4 +217,4 @@ npm pack
 
 [MIT](LICENSE)
 
-Provider names and trademarks belong to their respective owners. Coding Usage Bar is an independent project and is not affiliated with or endorsed by Anthropic, OpenAI, Zhipu AI, DeepSeek, or MiniMax. The package uses macOS system symbols instead of redistributing provider logos.
+Provider names and trademarks belong to their respective owners. Coding Usage Bar is an independent project and is not affiliated with or endorsed by Anthropic, OpenAI, Zhipu AI, DeepSeek, or MiniMax. Provider marks are used only for identification, are excluded from the MIT License, and are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

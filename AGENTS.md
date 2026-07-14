@@ -55,7 +55,7 @@ Coding Usage Bar 是独立开源项目，也是本工具的唯一事实源。它
 
 ## 菜单栏图标与插件保护
 
-- `titleImageValue` 使用 AppKit/JXA 渲染复合标题图像，每个 provider 有独立系统符号和文字段。发布包不分发第三方 Provider logo；新增 provider 必须为 `PROVIDER_ICON_FALLBACK` 选择可用的 SF Symbol。
+- `titleImageValue` 使用 AppKit/JXA 渲染复合标题图像，每个 provider 有独立标识和文字段。Provider 标识资产不适用 MIT License，必须登记在 `THIRD_PARTY_NOTICES.md`；缺少资产时由 `PROVIDER_ICON_FALLBACK` 的 SF Symbol 兜底，不能让整个复合标题退化成挤在一起的静态图。
 - 任何涉及 `menubar.ts`、`install.ts`、`daemon.ts`、`cli.ts` 的代码变更，在执行完 `npm test` 和 `coding-usage-bar install` 后，**必须验证 SwiftBar 插件文件仍然存在**：
   1. 读取 SwiftBar 当前 `PluginDirectory`：`defaults read com.ameba.SwiftBar PluginDirectory`
   2. 确认 `<PluginDirectory>/coding-usage-bar.1m.js` 文件存在且可执行
