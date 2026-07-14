@@ -33,6 +33,7 @@
   },
   "files": [
     "assets",
+    "docs/assets/demo.gif",
     "docs/assets/hero.png",
     "dist",
     "fixtures",

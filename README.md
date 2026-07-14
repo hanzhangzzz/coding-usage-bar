@@ -15,6 +15,14 @@ Coding Usage Bar does more than display quota percentages. It compares short rol
 
 Claude Code and Codex data stays local and is read from files those tools already produce. Provider API keys for GLM, DeepSeek, and MiniMax are stored only in `~/.coding-usage-bar/config.json` and sent directly to their respective quota APIs.
 
+## Live SwiftBar Menu
+
+The screenshot is captured from the live SwiftBar plugin. The animation reproduces opening and closing that menu without altering the captured usage data.
+
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="Opening the live Coding Usage Bar SwiftBar menu with Codex, Claude, GLM, DeepSeek, and MiniMax usage" width="800">
+</p>
+
 ## Quick Start
 
 ```bash

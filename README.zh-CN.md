@@ -10,6 +10,14 @@ Coding Usage Bar 同时支持 Claude Code、OpenAI Codex、GLM（智谱 AI）、
 
 Claude Code 与 Codex 的数据直接读取它们在本机产生的文件，不需要额外登录，也不会上传使用记录。GLM、DeepSeek 和 MiniMax 的 API Key 只保存在 `~/.coding-usage-bar/config.json`，并直接请求对应 Provider 的额度接口。
 
+## 真实 SwiftBar 菜单
+
+以下截图来自正在运行的 SwiftBar 插件；动画复现菜单的展开与收起，不修改截图中的用量数据。
+
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="打开 Coding Usage Bar 的真实 SwiftBar 菜单，查看 Codex、Claude、GLM、DeepSeek 和 MiniMax 用量" width="800">
+</p>
+
 ## 快速开始
 
 ```bash
