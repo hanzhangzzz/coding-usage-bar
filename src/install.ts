@@ -433,7 +433,7 @@ export function install(options: { dryRun?: boolean } = {}) {
   return messages;
 }
 
-export function uninstall(options: { dryRun?: boolean } = {}) {
+export function uninstall(options: { dryRun?: boolean; launchctlRunner?: LaunchctlRunner } = {}) {
   const dryRun = options.dryRun ?? false;
   const paths = buildPaths();
   const messages: string[] = [];
@@ -442,7 +442,7 @@ export function uninstall(options: { dryRun?: boolean } = {}) {
     if (dryRun) {
       messages.push(`[dry-run] would unload and remove ${paths.launchAgentFile}`);
     } else {
-      stopLaunchAgent(paths.launchAgentFile);
+      stopLaunchAgent(paths.launchAgentFile, options.launchctlRunner);
       fs.rmSync(paths.launchAgentFile, { force: true });
       messages.push(`Removed launchd agent: ${paths.launchAgentFile}`);
     }

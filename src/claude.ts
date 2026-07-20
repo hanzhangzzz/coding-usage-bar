@@ -124,27 +124,130 @@ function statusLineScriptCandidates(command: string) {
   return [...new Set(candidates)];
 }
 
+function stripInlineShellComment(line: string) {
+  let quote: "'" | "\"" | null = null;
+  let escaped = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if ((char === "'" || char === "\"") && !quote) {
+      quote = char;
+      continue;
+    }
+    if (char === quote) {
+      quote = null;
+      continue;
+    }
+    if (char === "#" && !quote && (index === 0 || /\s/.test(line[index - 1]))) {
+      return line.slice(0, index);
+    }
+  }
+  return line;
+}
+
+function hasBalancedShellQuotes(line: string) {
+  let quote: "'" | "\"" | null = null;
+  let escaped = false;
+  for (const char of line) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if ((char === "'" || char === "\"") && !quote) {
+      quote = char;
+    } else if (char === quote) {
+      quote = null;
+    }
+  }
+  return quote === null;
+}
+
+function executableShellLines(text: string) {
+  const result: string[] = [];
+  const heredocDelimiters: string[] = [];
+  for (const rawLine of text.replace(/\\\r?\n/g, " ").split(/\r?\n/)) {
+    if (heredocDelimiters.length > 0) {
+      if (rawLine.trim() === heredocDelimiters[0]) {
+        heredocDelimiters.shift();
+      }
+      continue;
+    }
+    const line = stripInlineShellComment(rawLine);
+    const heredocPattern = /<<-?\s*(?:'([^']+)'|"([^"]+)"|\\([^\s;|&()<>]+)|([^\s;|&()<>]+))/g;
+    const heredocs = [...line.matchAll(heredocPattern)];
+    if (heredocs.length > 0) {
+      for (const heredoc of heredocs) {
+        heredocDelimiters.push(heredoc[1] ?? heredoc[2] ?? heredoc[3] ?? heredoc[4]);
+      }
+      result.push(line.slice(0, heredocs[0].index));
+    } else {
+      result.push(line);
+    }
+  }
+  return result;
+}
+
 export function claudeStatusLineHasIngest(
   command: string | null,
   options: { appCliPath: string; managedScriptPath?: string },
 ) {
+  const isCliPath = (word: string) => (
+    path.basename(word) === "coding-usage-bar"
+    || word === options.appCliPath
+    || word.endsWith("/.coding-usage-bar/app/dist/cli.js")
+  );
+  const hasIngestCommand = (text: string) => {
+    const lines = executableShellLines(text);
+    if (lines.some((line) => !hasBalancedShellQuotes(line))) {
+      return false;
+    }
+    return lines.some((line) => {
+      if (!line.trim()) {
+        return false;
+      }
+      const words = splitShellWords(line);
+      const commandStarts = [0, ...words.flatMap((word, index) => word === "|" ? [index + 1] : [])];
+      return commandStarts.some((start) => {
+        const executable = words[start];
+        const executableIsNode = ["node", "nodejs"].includes(path.basename(executable ?? ""));
+        const cliIndex = executableIsNode ? start + 1 : start;
+        const finalArgument = words[cliIndex + 2]?.replace(/[;)]$/, "");
+        return isCliPath(words[cliIndex] ?? "")
+          && words[cliIndex + 1] === "ingest"
+          && finalArgument === "claude-statusline";
+      });
+    });
+  };
   if (!command) {
     return false;
   }
   if (
-    command.includes("coding-usage-bar ingest claude-statusline")
-    || command.includes(options.appCliPath)
+    hasIngestCommand(command)
     || command === options.managedScriptPath
   ) {
     return true;
   }
   for (const candidate of statusLineScriptCandidates(command)) {
     try {
+      if (isCliPath(candidate)) {
+        continue;
+      }
       if (!fs.statSync(candidate).isFile()) {
         continue;
       }
       const script = fs.readFileSync(candidate, "utf8");
-      if (script.includes("coding-usage-bar ingest claude-statusline") || script.includes(options.appCliPath)) {
+      if (hasIngestCommand(script)) {
         return true;
       }
     } catch {

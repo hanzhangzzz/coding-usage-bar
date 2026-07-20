@@ -7,6 +7,7 @@ import { buildPaths } from "../dist/paths.js";
 import { installClaudeStatusLine, isSameDirectory, stopLaunchAgent, uninstall } from "../dist/install.js";
 import { writeJsonAtomic } from "../dist/fs-util.js";
 import { stableNodeExecutable } from "../dist/node-runtime.js";
+import { claudeStatusLineHasIngest } from "../dist/claude.js";
 
 function createCustomStatusLine(home) {
   const paths = buildPaths(home);
@@ -69,7 +70,11 @@ test("installClaudeStatusLine detects integrated scripts invoked through an inte
   const paths = buildPaths(home);
   const script = path.join(home, "custom-statusline.sh");
   fs.mkdirSync(path.dirname(paths.claudeSettingsFile), { recursive: true });
-  fs.writeFileSync(script, "#!/usr/bin/env bash\ncoding-usage-bar ingest claude-statusline\n", { mode: 0o755 });
+  fs.writeFileSync(
+    script,
+    '#!/usr/bin/env bash\nnode "$HOME/.coding-usage-bar/app/dist/cli.js" ingest claude-statusline\n',
+    { mode: 0o755 },
+  );
   writeJsonAtomic(paths.claudeSettingsFile, {
     statusLine: {
       type: "command",
@@ -86,6 +91,54 @@ test("installClaudeStatusLine detects integrated scripts invoked through an inte
 
   assert.deepEqual(messages, ["Claude status line already includes coding-usage-bar ingest."]);
   assert.equal(fs.existsSync(paths.claudeStatusLineScript), false);
+});
+
+test("installClaudeStatusLine ignores comments and wrong coding-usage-bar subcommands", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-install-"));
+  const paths = buildPaths(home);
+  const script = path.join(home, "custom-statusline.sh");
+  fs.mkdirSync(path.dirname(paths.claudeSettingsFile), { recursive: true });
+  fs.writeFileSync(
+    script,
+    [
+      "#!/usr/bin/env bash",
+      '# node "$HOME/.coding-usage-bar/app/dist/cli.js" ingest claude-statusline',
+      'node "$HOME/.coding-usage-bar/app/dist/cli.js" status',
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  writeJsonAtomic(paths.claudeSettingsFile, {
+    statusLine: { type: "command", command: `bash ${script}` },
+  });
+
+  const messages = installClaudeStatusLine(paths, { dryRun: true });
+
+  assert.ok(messages.some((message) => message.includes("would ask whether to wrap")));
+  assert.ok(!messages.some((message) => message.includes("already includes coding-usage-bar ingest")));
+});
+
+test("claudeStatusLineHasIngest requires an executable ingest command position", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-ingest-detect-"));
+  const cli = path.join(home, ".coding-usage-bar", "app", "dist", "cli.js");
+  fs.mkdirSync(path.dirname(cli), { recursive: true });
+  fs.writeFileSync(cli, 'const help = "ingest claude-statusline";\n', "utf8");
+  const detects = (command) => claudeStatusLineHasIngest(command, { appCliPath: cli });
+
+  assert.equal(detects(`node "${cli}" ingest claude-statusline`), true);
+  assert.equal(detects(`printf input | node "${cli}" ingest claude-statusline;`), true);
+  assert.equal(detects(`printf input | \\\nnode "${cli}" ingest claude-statusline`), true);
+  assert.equal(detects(`node "${cli}" status`), false);
+  assert.equal(detects(`echo ready # node "${cli}" ingest claude-statusline`), false);
+  assert.equal(detects(`echo node "${cli}" ingest claude-statusline`), false);
+  assert.equal(detects(`printf node "${cli}" ingest claude-statusline`), false);
+  assert.equal(detects(`false && node "${cli}" ingest claude-statusline`), false);
+  assert.equal(detects(`node "${cli}.bak" ingest claude-statusline`), false);
+  assert.equal(detects(`cat <<'EOF'\nnode "${cli}" ingest claude-statusline\nEOF`), false);
+  assert.equal(detects(`cat <<123\nnode "${cli}" ingest claude-statusline\n123`), false);
+  assert.equal(detects(`cat <<'END-MARK'\nnode "${cli}" ingest claude-statusline\nEND-MARK`), false);
+  assert.equal(detects(`cat <<\\EOF\nnode "${cli}" ingest claude-statusline\nEOF`), false);
+  assert.equal(detects(`cat <<ONE <<TWO\nignored\nONE\nnode "${cli}" ingest claude-statusline\nTWO`), false);
+  assert.equal(detects(`printf '%s\nnode "${cli}" ingest claude-statusline\n' text`), false);
 });
 
 test("installClaudeStatusLine skips custom script when confirmation is rejected", () => {
@@ -159,10 +212,21 @@ test("uninstall restores wrapped custom status line command", () => {
   // Sandbox the SwiftBar plugin dir so uninstall can't touch the real menubar plugin.
   process.env.CODING_USAGE_BAR_PLUGIN_DIR = path.join(home, "swiftbar");
   try {
-    const messages = uninstall({ dryRun: false });
+    const launchctlCalls = [];
+    const messages = uninstall({
+      dryRun: false,
+      launchctlRunner: (_file, args) => {
+        launchctlCalls.push(args);
+        if (args[0] === "bootout") {
+          return;
+        }
+        throw new Error(`unexpected launchctl call: ${args.join(" ")}`);
+      },
+    });
     const settings = JSON.parse(fs.readFileSync(paths.claudeSettingsFile, "utf8"));
     assert.equal(settings.statusLine.command, script);
     assert.ok(messages.some((message) => message.includes("Restored user-managed Claude status line.")));
+    assert.deepEqual(launchctlCalls.map((args) => args[0]), ["bootout"]);
   } finally {
     if (originalHome === undefined) {
       delete process.env.HOME;

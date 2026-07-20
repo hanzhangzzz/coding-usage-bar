@@ -41,7 +41,11 @@ test("runDoctor accepts integrated scripts invoked through an interpreter", () =
   const paths = buildPaths(home);
   const script = path.join(home, "custom-statusline.sh");
   fs.mkdirSync(path.dirname(paths.claudeSettingsFile), { recursive: true });
-  fs.writeFileSync(script, "#!/usr/bin/env bash\ncoding-usage-bar ingest claude-statusline\n", "utf8");
+  fs.writeFileSync(
+    script,
+    '#!/usr/bin/env bash\nnode "$HOME/.coding-usage-bar/app/dist/cli.js" ingest claude-statusline\n',
+    "utf8",
+  );
   writeJsonAtomic(paths.configFile, { providers: ["claude"] });
   writeJsonAtomic(paths.claudeSettingsFile, {
     statusLine: {
@@ -56,6 +60,40 @@ test("runDoctor accepts integrated scripts invoked through an interpreter", () =
     const checks = runDoctor({ dryRun: true });
     const statusLine = checks.find((check) => check.name === "Claude status line");
     assert.equal(statusLine?.ok, true);
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+  }
+});
+
+test("runDoctor rejects comment-only and wrong-subcommand ingest references", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-doctor-"));
+  const paths = buildPaths(home);
+  const script = path.join(home, "custom-statusline.sh");
+  fs.mkdirSync(path.dirname(paths.claudeSettingsFile), { recursive: true });
+  fs.writeFileSync(
+    script,
+    [
+      "#!/usr/bin/env bash",
+      '# node "$HOME/.coding-usage-bar/app/dist/cli.js" ingest claude-statusline',
+      'node "$HOME/.coding-usage-bar/app/dist/cli.js" status',
+    ].join("\n"),
+    "utf8",
+  );
+  writeJsonAtomic(paths.configFile, { providers: ["claude"] });
+  writeJsonAtomic(paths.claudeSettingsFile, {
+    statusLine: { type: "command", command: `bash ${script}` },
+  });
+
+  const originalHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const checks = runDoctor({ dryRun: true });
+    const statusLine = checks.find((check) => check.name === "Claude status line");
+    assert.equal(statusLine?.ok, false);
   } finally {
     if (originalHome === undefined) {
       delete process.env.HOME;
