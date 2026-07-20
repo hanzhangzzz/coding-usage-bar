@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SOURCE_IMAGE="$ROOT_DIR/assets/screenshot-20260714-160548.png"
+SOURCE_IMAGE="$ROOT_DIR/assets/screenshot-20260720-153409.png"
 OUTPUT_GIF="$ROOT_DIR/docs/assets/demo.gif"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/coding-usage-bar-demo.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
