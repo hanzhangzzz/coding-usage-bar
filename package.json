@@ -1,6 +1,6 @@
 {
   "name": "coding-usage-bar",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "macOS menu bar usage monitor for Claude Code, Codex, GLM, DeepSeek, and MiniMax.",
   "author": "hanzhangzzz",
   "license": "MIT",
