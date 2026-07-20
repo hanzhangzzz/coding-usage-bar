@@ -6,6 +6,7 @@ import { collectCodexUsage } from "./codex.js";
 import { readJsonFile } from "./fs-util.js";
 import { collectGlmUsage } from "./glm.js";
 import { collectDeepseekUsage } from "./deepseek.js";
+import { collectKimiUsage, resolveKimiConfig } from "./kimi.js";
 import { collectMinimaxUsage } from "./minimax.js";
 import { buildPaths } from "./paths.js";
 import { loadLatestUsage, loadSamples, saveUsage } from "./store.js";
@@ -20,7 +21,7 @@ import {
 const FIXTURES_DIR = fileURLToPath(new URL("../fixtures", import.meta.url));
 
 export function loadFixtureUsages(fixturesDir: string): ProviderUsage[] {
-  const providers = ["claude", "codex", "glm", "deepseek", "minimax"] as const;
+  const providers = ["claude", "codex", "glm", "deepseek", "minimax", "kimi"] as const;
   return providers
     .map((provider) => readJsonFile<ProviderUsage>(path.join(fixturesDir, provider, "latest.json")))
     .filter((item): item is ProviderUsage => item !== null);
@@ -181,6 +182,42 @@ export async function collectLocalState(options: { fixtures?: boolean } = {}): P
             provider: "minimax",
             severity: "error",
             code: "MINIMAX_USAGE_MISSING",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+  }
+
+  if (monitored.has("kimi")) {
+    const kimiConfig = resolveKimiConfig(config.kimi, paths.homeDir);
+    if (!kimiConfig.apiKey) {
+      issues.push({
+        provider: "kimi",
+        severity: "warning",
+        code: "KIMI_API_KEY_MISSING",
+        message: "Kimi API key not configured. Edit ~/.coding-usage-bar/config.json to set kimi.apiKey, or configure a kimi.com lane in ~/.config/claude-lanes/config.env.",
+      });
+    } else {
+      try {
+        const kimi = await collectKimiUsage(kimiConfig);
+        saveUsage(kimi, paths);
+        usages.push(kimi);
+      } catch (error) {
+        const cached = loadLatestUsage("kimi", paths);
+        if (cached) {
+          usages.push(cached);
+          issues.push({
+            provider: "kimi",
+            severity: "warning",
+            code: "KIMI_USING_CACHE",
+            message: `Kimi live usage unavailable; using cached usage from ${cached.observedAt}. ${error instanceof Error ? error.message : String(error)}`,
+          });
+        } else {
+          issues.push({
+            provider: "kimi",
+            severity: "error",
+            code: "KIMI_USAGE_MISSING",
             message: error instanceof Error ? error.message : String(error),
           });
         }

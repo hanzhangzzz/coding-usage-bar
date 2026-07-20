@@ -27,6 +27,7 @@ const PROVIDER_ICON_ASSET: Record<string, string> = {
   glm: "provider-glm.png",
   deepseek: "provider-deepseek.png",
   minimax: "provider-minimax.png",
+  kimi: "provider-kimi.png",
 };
 
 const PROVIDER_ICON_DARK_ASSET: Record<string, string> = {
@@ -39,6 +40,7 @@ const PROVIDER_ICON_FALLBACK: Record<string, string> = {
   glm: "cpu",
   deepseek: "bubble.left.and.bubble.right",
   minimax: "waveform.path.ecg",
+  kimi: "k.square.fill",
 };
 
 const TITLE_ICON_ASSET = "provider-marks.png";
@@ -67,7 +69,7 @@ const STATE_PRIORITY: Record<BurnState, number> = {
 const TEXT_COLOR = "#111827,#F9FAFB";
 const MUTED_COLOR = "#6B7280,#A1A1AA";
 const ROW_FONT = "Menlo";
-const TITLE_PROVIDER_ORDER = ["codex", "claude", "glm", "deepseek", "minimax"];
+const TITLE_PROVIDER_ORDER = ["codex", "claude", "glm", "deepseek", "minimax", "kimi"];
 const TITLE_SEPARATOR = "│";
 const METER_WIDTH = 12;
 const ASSET_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "assets");
@@ -663,6 +665,9 @@ function issueLabel(code: string) {
   }
   if (code === "MINIMAX_API_KEY_MISSING") {
     return "MiniMax API key not set";
+  }
+  if (code === "KIMI_API_KEY_MISSING") {
+    return "Kimi API key not set";
   }
   if (code === "USAGE_STALE") {
     return "Usage data is stale";

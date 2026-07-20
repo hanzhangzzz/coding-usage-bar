@@ -7,6 +7,7 @@ Coding Usage Bar 是独立开源项目，也是本工具的唯一事实源。它
 ## 设计边界
 
 - 不处理登录态，不托管凭据，不把 API key 上传到任何中间服务；GLM、DeepSeek、MiniMax 的 key 只从本地配置读取并直接发送给对应 Provider API。
+- Kimi 的 key 优先读 `~/.coding-usage-bar/config.json` 的 `kimi.apiKey`；为空时回退到 `~/.config/claude-lanes/config.env` 中 `CONFIG_<n>_BASE_URL` 指向 kimi.com 的 lane（用其 `AUTH_TOKEN` 和 base URL），不硬编码 lane 编号。
 - 不主动请求 Claude/Codex 的内部 usage backend；v1 只使用本机已有 usage 结果。
 - Codex 数据源是 `~/.codex` session/rollout JSONL 中的 `payload.rate_limits`。
 - Claude 数据源是 `coding-usage-bar ingest claude-statusline` 写入的 `~/.coding-usage-bar/claude/latest.json`。
@@ -22,7 +23,7 @@ Coding Usage Bar 是独立开源项目，也是本工具的唯一事实源。它
 - 用户入口是 `npx coding-usage-bar install`。
 - 日常命令是 `coding-usage-bar doctor` 和 `coding-usage-bar status`。
 - 普通 commit 不自动发布。只有明确准备 Release 时才更新版本、发布 npm 并创建 GitHub Release。
-- provider 监控范围由 `~/.coding-usage-bar/config.json` 的 `providers` 控制，默认 `["codex", "claude", "glm", "deepseek", "minimax"]`；临时覆盖可用 `CODING_USAGE_BAR_PROVIDERS=codex,claude`。
+- provider 监控范围由 `~/.coding-usage-bar/config.json` 的 `providers` 控制，默认 `["codex", "claude", "glm", "deepseek", "minimax", "kimi"]`；临时覆盖可用 `CODING_USAGE_BAR_PROVIDERS=codex,claude`。
 - v1 完整支持 macOS launchd；Windows 只保留通知/调度设计，不承诺可用。
 - 安装器必须把当前构建产物复制到 `~/.coding-usage-bar/app/`，launchd 只能指向该稳定副本，不能指向 npx 临时缓存。
 - 安装器必须创建用户级 CLI shim：`~/.local/bin/coding-usage-bar -> ~/.coding-usage-bar/app/dist/cli.js`，否则 `coding-usage-bar doctor/status` 不能作为日常命令直接使用。

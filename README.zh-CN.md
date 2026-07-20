@@ -6,16 +6,16 @@
 
 ![Coding Usage Bar 在 macOS 菜单栏展示多个 AI 编程 Provider 的套餐用量](docs/assets/hero.png)
 
-Coding Usage Bar 同时支持 Claude Code、OpenAI Codex、GLM（智谱 AI）、DeepSeek 和 MiniMax。它不只展示百分比，还会结合短周期和周额度判断当前节奏是偏慢、正常、偏快，还是已经接近限额。
+Coding Usage Bar 同时支持 Claude Code、OpenAI Codex、GLM（智谱 AI）、DeepSeek、MiniMax 和 Kimi（Moonshot AI）。它不只展示百分比，还会结合短周期和周额度判断当前节奏是偏慢、正常、偏快，还是已经接近限额。
 
-Claude Code 与 Codex 的数据直接读取它们在本机产生的文件，不需要额外登录，也不会上传使用记录。GLM、DeepSeek 和 MiniMax 的 API Key 只保存在 `~/.coding-usage-bar/config.json`，并直接请求对应 Provider 的额度接口。
+Claude Code 与 Codex 的数据直接读取它们在本机产生的文件，不需要额外登录，也不会上传使用记录。GLM、DeepSeek 和 MiniMax 的 API Key 只保存在 `~/.coding-usage-bar/config.json`，并直接请求对应 Provider 的额度接口。Kimi 的 Key 优先读 `~/.coding-usage-bar/config.json`，未配置时回退到 `~/.config/claude-lanes/config.env` 中指向 kimi.com 的 lane。
 
 ## 真实 SwiftBar 菜单
 
 以下截图来自正在运行的 SwiftBar 插件；动画复现菜单的展开与收起，不修改截图中的用量数据。
 
 <p align="center">
-  <img src="docs/assets/demo.gif" alt="打开 Coding Usage Bar 的真实 SwiftBar 菜单，查看 Codex、Claude、GLM、DeepSeek 和 MiniMax 用量" width="800">
+  <img src="docs/assets/demo.gif" alt="打开 Coding Usage Bar 的真实 SwiftBar 菜单，查看 Codex、Claude、GLM、DeepSeek、MiniMax 和 Kimi 用量" width="800">
 </p>
 
 ## 快速开始
@@ -58,4 +58,4 @@ npm pack
 
 [MIT](LICENSE)
 
-各 Provider 名称与商标归其权利人所有。本项目独立开发，与 Anthropic、OpenAI、智谱 AI、DeepSeek、MiniMax 无隶属或背书关系。Provider 标识仅用于识别，不适用项目 MIT License，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+各 Provider 名称与商标归其权利人所有。本项目独立开发，与 Anthropic、OpenAI、智谱 AI、DeepSeek、MiniMax、Moonshot AI 无隶属或背书关系。Provider 标识仅用于识别，不适用项目 MIT License，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

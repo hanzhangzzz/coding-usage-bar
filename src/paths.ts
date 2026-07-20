@@ -13,6 +13,7 @@ export function buildPaths(homeDir = os.homedir()): RuntimePaths {
     glmDir: path.join(stateDir, "glm"),
     deepseekDir: path.join(stateDir, "deepseek"),
     minimaxDir: path.join(stateDir, "minimax"),
+    kimiDir: path.join(stateDir, "kimi"),
     notificationStateFile: path.join(stateDir, "notifications.json"),
     statusFile: path.join(stateDir, "status.json"),
     starPromptFile: path.join(stateDir, "star-prompt.json"),
@@ -39,6 +40,7 @@ function providerDir(paths: RuntimePaths, provider: ProviderId): string {
   if (provider === "glm") return paths.glmDir;
   if (provider === "deepseek") return paths.deepseekDir;
   if (provider === "minimax") return paths.minimaxDir;
+  if (provider === "kimi") return paths.kimiDir;
   if (provider === "claude") return paths.claudeDir;
   return paths.codexDir;
 }

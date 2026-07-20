@@ -1,9 +1,9 @@
 import { readJsonFile, writeJsonAtomic } from "./fs-util.js";
 import { buildPaths } from "./paths.js";
-import { BurnConfig, GlmConfig, DeepseekConfig, MinimaxConfig, ProviderId, RuntimePaths } from "./types.js";
+import { BurnConfig, GlmConfig, DeepseekConfig, MinimaxConfig, KimiConfig, ProviderId, RuntimePaths } from "./types.js";
 
-const DEFAULT_PROVIDERS: ProviderId[] = ["codex", "claude", "glm", "deepseek", "minimax"];
-const PROVIDERS = new Set<ProviderId>(["codex", "claude", "glm", "deepseek", "minimax"]);
+const DEFAULT_PROVIDERS: ProviderId[] = ["codex", "claude", "glm", "deepseek", "minimax", "kimi"];
+const PROVIDERS = new Set<ProviderId>(["codex", "claude", "glm", "deepseek", "minimax", "kimi"]);
 
 function normalizeProviders(value: unknown): ProviderId[] {
   if (!Array.isArray(value)) {
@@ -29,6 +29,7 @@ export function defaultConfig(): BurnConfig {
     glm: { baseUrl: "https://open.bigmodel.cn", apiKey: "" },
     deepseek: { apiKey: "" },
     minimax: { region: "cn", apiKey: "" },
+    kimi: { apiKey: "" },
   };
 }
 
@@ -47,6 +48,7 @@ export function readConfig(paths: RuntimePaths = buildPaths()): BurnConfig {
     glm: fileConfig.glm ?? defaultConfig().glm,
     deepseek: fileConfig.deepseek ?? defaultConfig().deepseek,
     minimax: fileConfig.minimax ?? defaultConfig().minimax,
+    kimi: fileConfig.kimi ?? defaultConfig().kimi,
   };
 }
 
@@ -67,6 +69,10 @@ export function ensureConfig(paths: RuntimePaths = buildPaths()) {
   const latest = readJsonFile<Partial<BurnConfig>>(paths.configFile) ?? existing;
   if (!latest.minimax) {
     writeJsonAtomic(paths.configFile, { ...latest, minimax: defaultConfig().minimax });
+  }
+  const current = readJsonFile<Partial<BurnConfig>>(paths.configFile) ?? latest;
+  if (!current.kimi) {
+    writeJsonAtomic(paths.configFile, { ...current, kimi: defaultConfig().kimi });
   }
   return false;
 }

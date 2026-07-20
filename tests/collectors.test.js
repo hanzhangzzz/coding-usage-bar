@@ -5,6 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { usageFromClaudeStatusLine } from "../dist/claude.js";
 import { collectCodexUsage } from "../dist/codex.js";
+import { readClaudeLanesKimiConfig, resolveKimiConfig, usageFromKimiUsages } from "../dist/kimi.js";
 import { usageFromMinimaxQuota } from "../dist/minimax.js";
 
 test("usageFromClaudeStatusLine normalizes status line rate limits", () => {
@@ -261,4 +262,155 @@ test("usageFromMinimaxQuota rejects empty model_remains", () => {
   }, { source: "https://api.minimaxi.com/v1/token_plan/remains" });
 
   assert.equal(usage, null);
+});
+
+test("usageFromKimiUsages maps 300-minute window to 5h and top-level usage to 7d", () => {
+  // Real Kimi /coding/v1/usages response shape: all quota values are strings.
+  const usage = usageFromKimiUsages({
+    user: { membership: { level: "LEVEL_INTERMEDIATE" } },
+    usage: { limit: "100", used: "2", remaining: "98", resetTime: "2026-07-26T02:38:49.743753Z" },
+    limits: [
+      {
+        window: { duration: 300, timeUnit: "TIME_UNIT_MINUTE" },
+        detail: { limit: "100", used: "10", remaining: "90", resetTime: "2026-07-20T03:38:49.743753Z" },
+      },
+    ],
+  }, { source: "https://api.kimi.com/coding/v1/usages" });
+
+  assert.ok(usage, "expected usage to be returned");
+  assert.equal(usage.provider, "kimi");
+  assert.equal(usage.planType, "LEVEL_INTERMEDIATE");
+  const fiveHour = usage.windows.find((w) => w.name === "five_hour");
+  const sevenDay = usage.windows.find((w) => w.name === "seven_day");
+  assert.equal(fiveHour.usedPercent, 10);
+  assert.equal(fiveHour.windowMinutes, 300);
+  assert.equal(sevenDay.usedPercent, 2);
+  assert.equal(sevenDay.windowMinutes, 10080);
+  assert.equal(sevenDay.resetsAt, "2026-07-26T02:38:49.743753Z");
+});
+
+test("usageFromKimiUsages accepts numeric quota values and derives total from used + remaining", () => {
+  const usage = usageFromKimiUsages({
+    usage: { limit: 0, used: 3, remaining: 7, resetTime: "2026-07-26T02:38:49.743753Z" },
+    limits: [
+      {
+        window: { duration: 300, timeUnit: "TIME_UNIT_MINUTE" },
+        detail: { limit: 50, used: 25, remaining: 25, resetTime: "2026-07-20T03:38:49.743753Z" },
+      },
+    ],
+  }, { source: "https://api.kimi.com/coding/v1/usages" });
+
+  assert.ok(usage, "expected usage to be returned");
+  const fiveHour = usage.windows.find((w) => w.name === "five_hour");
+  const sevenDay = usage.windows.find((w) => w.name === "seven_day");
+  assert.equal(fiveHour.usedPercent, 50, "5h used = 25/50 * 100");
+  assert.equal(sevenDay.usedPercent, 30, "7d used = 3/(3+7) * 100 when limit is 0");
+});
+
+test("usageFromKimiUsages falls back to the shortest window when no 300-minute entry exists", () => {
+  const usage = usageFromKimiUsages({
+    usage: { limit: "100", used: "1", remaining: "99", resetTime: "2026-07-26T02:38:49.743753Z" },
+    limits: [
+      {
+        window: { duration: 1440, timeUnit: "TIME_UNIT_MINUTE" },
+        detail: { limit: "100", used: "40", remaining: "60", resetTime: "2026-07-21T03:38:49.743753Z" },
+      },
+      {
+        window: { duration: 60, timeUnit: "TIME_UNIT_MINUTE" },
+        detail: { limit: "100", used: "5", remaining: "95", resetTime: "2026-07-20T04:38:49.743753Z" },
+      },
+    ],
+  }, { source: "https://api.kimi.com/coding/v1/usages" });
+
+  assert.ok(usage, "expected usage to be returned");
+  const fiveHour = usage.windows.find((w) => w.name === "five_hour");
+  assert.equal(fiveHour.usedPercent, 5, "picks the shortest window as the short-window signal");
+});
+
+test("usageFromKimiUsages returns null when a window signal is missing", () => {
+  assert.equal(usageFromKimiUsages({
+    usage: { limit: "100", used: "2", remaining: "98", resetTime: "2026-07-26T02:38:49.743753Z" },
+    limits: [],
+  }, { source: "https://api.kimi.com/coding/v1/usages" }), null);
+
+  assert.equal(usageFromKimiUsages({
+    limits: [
+      {
+        window: { duration: 300, timeUnit: "TIME_UNIT_MINUTE" },
+        detail: { limit: "100", used: "10", remaining: "90", resetTime: "2026-07-20T03:38:49.743753Z" },
+      },
+    ],
+  }, { source: "https://api.kimi.com/coding/v1/usages" }), null);
+
+  assert.equal(usageFromKimiUsages({
+    usage: { resetTime: "2026-07-26T02:38:49.743753Z" },
+    limits: [
+      {
+        window: { duration: 300, timeUnit: "TIME_UNIT_MINUTE" },
+        detail: { limit: "100", used: "10", remaining: "90", resetTime: "2026-07-20T03:38:49.743753Z" },
+      },
+    ],
+  }, { source: "https://api.kimi.com/coding/v1/usages" }), null);
+});
+
+test("readClaudeLanesKimiConfig finds the kimi.com lane regardless of index", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-kimi-lanes-"));
+  const file = path.join(dir, "config.env");
+  fs.writeFileSync(
+    file,
+    [
+      "# Claude Code 模型配置",
+      "CONFIG_0_BASE_URL=https://api.minimaxi.com/anthropic",
+      "CONFIG_0_AUTH_TOKEN=sk-cp-minimax",
+      "",
+      "CONFIG_3_BASE_URL=https://api.kimi.com/coding/",
+      "CONFIG_3_AUTH_TOKEN=sk-kimi-test",
+      "CONFIG_3_MODEL=k3[1m]",
+      "# CONFIG_4_BASE_URL=https://api.kimi.com/coding/",
+      "# CONFIG_4_AUTH_TOKEN=sk-kimi-commented",
+    ].join("\n"),
+    "utf8",
+  );
+
+  assert.deepEqual(readClaudeLanesKimiConfig(file), {
+    baseUrl: "https://api.kimi.com/coding/",
+    apiKey: "sk-kimi-test",
+  });
+});
+
+test("readClaudeLanesKimiConfig returns null without a kimi lane or file", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-kimi-lanes-"));
+  const file = path.join(dir, "config.env");
+  fs.writeFileSync(
+    file,
+    "CONFIG_0_BASE_URL=https://api.minimaxi.com/anthropic\nCONFIG_0_AUTH_TOKEN=sk-cp-minimax\n",
+    "utf8",
+  );
+
+  assert.equal(readClaudeLanesKimiConfig(file), null);
+  assert.equal(readClaudeLanesKimiConfig(path.join(dir, "missing.env")), null);
+});
+
+test("resolveKimiConfig prefers config.json key and falls back to claude-lanes", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-kimi-resolve-"));
+  const lanesDir = path.join(home, ".config", "claude-lanes");
+  fs.mkdirSync(lanesDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(lanesDir, "config.env"),
+    "CONFIG_3_BASE_URL=https://api.kimi.com/coding/\nCONFIG_3_AUTH_TOKEN=sk-kimi-lanes\n",
+    "utf8",
+  );
+
+  assert.deepEqual(resolveKimiConfig({ apiKey: "" }, home), {
+    baseUrl: "https://api.kimi.com/coding/",
+    apiKey: "sk-kimi-lanes",
+  });
+  assert.deepEqual(resolveKimiConfig({ apiKey: "sk-kimi-config" }, home), {
+    baseUrl: "https://api.kimi.com/coding/",
+    apiKey: "sk-kimi-config",
+  });
+  assert.deepEqual(resolveKimiConfig(undefined, home), {
+    baseUrl: "https://api.kimi.com/coding/",
+    apiKey: "sk-kimi-lanes",
+  });
 });

@@ -8,7 +8,7 @@ import { buildPaths } from "../dist/paths.js";
 import { writeJsonAtomic } from "../dist/fs-util.js";
 
 test("readConfig defaults to all supported providers", () => {
-  assert.deepEqual(defaultConfig().providers, ["codex", "claude", "glm", "deepseek", "minimax"]);
+  assert.deepEqual(defaultConfig().providers, ["codex", "claude", "glm", "deepseek", "minimax", "kimi"]);
 });
 
 test("readConfig supports provider selection from config file", () => {
@@ -25,5 +25,5 @@ test("ensureConfig creates default config once", () => {
 
   assert.equal(ensureConfig(paths), true);
   assert.equal(ensureConfig(paths), false);
-  assert.deepEqual(readConfig(paths).providers, ["codex", "claude", "glm", "deepseek", "minimax"]);
+  assert.deepEqual(readConfig(paths).providers, ["codex", "claude", "glm", "deepseek", "minimax", "kimi"]);
 });

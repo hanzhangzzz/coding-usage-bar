@@ -76,7 +76,7 @@ export function markNotified(
 }
 
 function notificationText(analysis: BurnAnalysis) {
-  const provider = analysis.provider === "claude" ? "Claude" : analysis.provider === "glm" ? "GLM" : "Codex";
+  const provider = analysis.provider === "claude" ? "Claude" : analysis.provider === "glm" ? "GLM" : analysis.provider === "minimax" ? "MiniMax" : analysis.provider === "deepseek" ? "DeepSeek" : analysis.provider === "kimi" ? "Kimi" : "Codex";
   const suffix = analysis.fiveHour ? `剩 ${formatDurationUntil(analysis.fiveHour.resetsAt)} 重置。` : "";
   if (analysis.state === "UNDER_BURN") {
     return {

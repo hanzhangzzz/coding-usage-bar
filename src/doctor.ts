@@ -4,6 +4,7 @@ import { readConfig } from "./config.js";
 import { collectCodexUsage } from "./codex.js";
 import { claudeStatusLineHasIngest, getClaudeStatusLineCommand, readClaudeSettings } from "./claude.js";
 import { isDir, isFile } from "./fs-util.js";
+import { resolveKimiConfig } from "./kimi.js";
 import { buildPaths, providerLatestPath } from "./paths.js";
 import { notificationBackend } from "./notifier.js";
 import { isSwiftBarInstalled, swiftBarPluginPath } from "./menubar.js";
@@ -190,6 +191,38 @@ export function runDoctor(options: { dryRun?: boolean } = {}): DoctorCheck[] {
   } else {
     checks.push({
       name: "MiniMax",
+      ok: true,
+      message: "disabled by config",
+    });
+  }
+
+  if (monitored.has("kimi")) {
+    const kimiConfig = resolveKimiConfig(config.kimi, paths.homeDir);
+    const hasApiKey = Boolean(kimiConfig.apiKey);
+    const keySource = config.kimi?.apiKey
+      ? "coding-usage-bar config"
+      : "claude-lanes config.env";
+    checks.push({
+      name: "Kimi API key",
+      ok: hasApiKey,
+      message: hasApiKey
+        ? `configured (${keySource})`
+        : "not set; edit ~/.coding-usage-bar/config.json to set kimi.apiKey, or configure a kimi.com lane in ~/.config/claude-lanes/config.env",
+    });
+
+    const kimiLatest = providerLatestPath(paths, "kimi");
+    checks.push({
+      name: "Kimi usage cache",
+      ok: !hasApiKey || isFile(kimiLatest),
+      message: isFile(kimiLatest)
+        ? `found ${kimiLatest}`
+        : hasApiKey
+          ? `missing ${kimiLatest}; run coding-usage-bar daemon --once to collect`
+          : "skipped (API key not set)",
+    });
+  } else {
+    checks.push({
+      name: "Kimi",
       ok: true,
       message: "disabled by config",
     });

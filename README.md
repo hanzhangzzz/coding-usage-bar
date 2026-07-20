@@ -2,25 +2,25 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-**Claude Code and Codex usage monitoring in your macOS menu bar.** Track rolling plan limits across Claude Code, OpenAI Codex, GLM (Zhipu AI), DeepSeek, and MiniMax before a coding session hits the wall.
+**Claude Code and Codex usage monitoring in your macOS menu bar.** Track rolling plan limits across Claude Code, OpenAI Codex, GLM (Zhipu AI), DeepSeek, MiniMax, and Kimi (Moonshot AI) before a coding session hits the wall.
 
 [![npm](https://img.shields.io/npm/v/coding-usage-bar.svg)](https://www.npmjs.com/package/coding-usage-bar)
 [![CI](https://github.com/hanzhangzzz/coding-usage-bar/actions/workflows/test.yml/badge.svg)](https://github.com/hanzhangzzz/coding-usage-bar/actions/workflows/test.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg?logo=apple)](#requirements)
 
-![Coding Usage Bar showing Claude Code, Codex, GLM, DeepSeek, and MiniMax plan usage in the macOS menu bar](docs/assets/hero.png)
+![Coding Usage Bar showing Claude Code, Codex, GLM, DeepSeek, MiniMax, and Kimi plan usage in the macOS menu bar](docs/assets/hero.png)
 
 Coding Usage Bar does more than display quota percentages. It compares short rolling windows with the weekly budget and labels your pace as learning, under-burning, on track, over-burning, or close to a limit.
 
-Claude Code and Codex data stays local and is read from files those tools already produce. Provider API keys for GLM, DeepSeek, and MiniMax are stored only in `~/.coding-usage-bar/config.json` and sent directly to their respective quota APIs.
+Claude Code and Codex data stays local and is read from files those tools already produce. Provider API keys for GLM, DeepSeek, and MiniMax are stored only in `~/.coding-usage-bar/config.json` and sent directly to their respective quota APIs. Kimi reads its key from `~/.coding-usage-bar/config.json` or, when unset, from the kimi.com lane in `~/.config/claude-lanes/config.env`.
 
 ## Live SwiftBar Menu
 
 The screenshot is captured from the live SwiftBar plugin. The animation reproduces opening and closing that menu without altering the captured usage data.
 
 <p align="center">
-  <img src="docs/assets/demo.gif" alt="Opening the live Coding Usage Bar SwiftBar menu with Codex, Claude, GLM, DeepSeek, and MiniMax usage" width="800">
+  <img src="docs/assets/demo.gif" alt="Opening the live Coding Usage Bar SwiftBar menu with Codex, Claude, GLM, DeepSeek, MiniMax, and Kimi usage" width="800">
 </p>
 
 ## Quick Start
@@ -127,6 +127,21 @@ Coding Usage Bar calls `GET https://api.minimaxi.com/v1/token_plan/remains` to r
 
 `region` defaults to `cn` (api.minimaxi.com); set it to `global` to use api.minimax.io. Without this key, MiniMax monitoring will report `MINIMAX_API_KEY_MISSING`.
 
+## Kimi (Moonshot AI)
+
+Coding Usage Bar calls `GET https://api.kimi.com/coding/v1/usages` to read 5h and 7d usage windows. The response carries the 300-minute rolling window in `limits[]` and the weekly window in the top-level `usage`, with `limit`/`used`/`remaining` as strings; Coding Usage Bar derives used% from `used / limit` (or from `used / (used + remaining)` when limit is 0). Set `kimi.apiKey` in `~/.coding-usage-bar/config.json`:
+
+```json
+{
+  "providers": ["codex", "claude", "glm", "minimax", "kimi"],
+  "kimi": {
+    "apiKey": "your-kimi-api-key"
+  }
+}
+```
+
+If `kimi.apiKey` is empty, Coding Usage Bar falls back to the lane whose `CONFIG_<n>_BASE_URL` points at kimi.com in `~/.config/claude-lanes/config.env` and uses that lane's `CONFIG_<n>_AUTH_TOKEN` (and base URL). Without either source, Kimi monitoring will report `KIMI_API_KEY_MISSING`.
+
 ## Profiles
 
 Set `CODING_USAGE_BAR_PROFILE=high` for the more aggressive profile. The default is `low`.
@@ -143,7 +158,7 @@ Both profiles are constrained by the weekly budget. When a short window is repor
 
 ```json
 {
-  "providers": ["codex", "claude", "glm", "deepseek", "minimax"]
+  "providers": ["codex", "claude", "glm", "deepseek", "minimax", "kimi"]
 }
 ```
 
@@ -161,7 +176,7 @@ coding-usage-bar menubar install
 
 If SwiftBar is not installed, `coding-usage-bar doctor` will report it. If SwiftBar already has a custom plugin folder, Coding Usage Bar uses that folder.
 
-The compact menu bar title and dropdown use recognizable Provider marks for Codex, Claude Code, Zhipu AI, DeepSeek, and MiniMax alongside the rolling-window data (DeepSeek shows balance instead of windows):
+The compact menu bar title and dropdown use recognizable Provider marks for Codex, Claude Code, Zhipu AI, DeepSeek, MiniMax, and Kimi alongside the rolling-window data (DeepSeek shows balance instead of windows):
 
 ```text
 {Codex icon} 5H:14%,7D:67% │ {Claude icon} 5H:24%,7D:74% │ {GLM icon} 5H:36%,7D:7%
@@ -174,13 +189,14 @@ SwiftBar only supports one bitmap image on a single stable title item, so Coding
 | Path | Purpose |
 |------|---------|
 | `~/.coding-usage-bar/app/` | Stable runtime copy used by launchd, Claude ingest hints, and SwiftBar |
-| `~/.coding-usage-bar/config.json` | Provider selection, default `["codex", "claude", "glm", "deepseek", "minimax"]` |
+| `~/.coding-usage-bar/config.json` | Provider selection, default `["codex", "claude", "glm", "deepseek", "minimax", "kimi"]` |
 | `~/.coding-usage-bar/status.json` | Stable display-layer entry point |
 | `~/.coding-usage-bar/codex/latest.json` | Latest normalized Codex usage |
 | `~/.coding-usage-bar/claude/latest.json` | Latest normalized Claude usage after status line ingest |
 | `~/.coding-usage-bar/glm/latest.json` | Latest normalized GLM usage from Zhipu AI quota API |
 | `~/.coding-usage-bar/deepseek/latest.json` | Latest normalized DeepSeek balance from DeepSeek API |
 | `~/.coding-usage-bar/minimax/latest.json` | Latest normalized MiniMax 5h/7d usage from MiniMax API |
+| `~/.coding-usage-bar/kimi/latest.json` | Latest normalized Kimi 5h/7d usage from Kimi usages API |
 | `~/.local/bin/coding-usage-bar` | CLI shim pointing at the stable runtime |
 | `~/Library/LaunchAgents/com.duying.coding-usage-bar.plist` | macOS launchd agent |
 | SwiftBar `PluginDirectory` / `coding-usage-bar.1m.js` | Menu bar plugin wrapper |
@@ -199,7 +215,7 @@ See the [product and technical baseline](https://github.com/hanzhangzzz/coding-u
 
 ## Why Coding Usage Bar?
 
-- **One menu bar for multiple coding providers:** Claude Code, Codex, GLM, DeepSeek, and MiniMax.
+- **One menu bar for multiple coding providers:** Claude Code, Codex, GLM, DeepSeek, MiniMax, and Kimi.
 - **Pacing, not just percentages:** short-window usage is evaluated against the weekly budget.
 - **Local-first:** Claude Code and Codex usage is read from local tool output, without a separate account or telemetry service.
 - **Visible but lightweight:** SwiftBar is only the host; collection and display state remain separated and auditable.
@@ -225,4 +241,4 @@ npm pack
 
 [MIT](LICENSE)
 
-Provider names and trademarks belong to their respective owners. Coding Usage Bar is an independent project and is not affiliated with or endorsed by Anthropic, OpenAI, Zhipu AI, DeepSeek, or MiniMax. Provider marks are used only for identification, are excluded from the MIT License, and are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Provider names and trademarks belong to their respective owners. Coding Usage Bar is an independent project and is not affiliated with or endorsed by Anthropic, OpenAI, Zhipu AI, DeepSeek, MiniMax, or Moonshot AI. Provider marks are used only for identification, are excluded from the MIT License, and are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

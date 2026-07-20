@@ -66,7 +66,7 @@ export function estimateConversionRate(samples: ProviderUsage[]): number | null 
 }
 
 function providerLabel(provider: ProviderId) {
-  return provider === "claude" ? "Claude" : provider === "glm" ? "GLM" : provider === "deepseek" ? "DeepSeek" : provider === "minimax" ? "MiniMax" : "Codex";
+  return provider === "claude" ? "Claude" : provider === "glm" ? "GLM" : provider === "deepseek" ? "DeepSeek" : provider === "minimax" ? "MiniMax" : provider === "kimi" ? "Kimi" : "Codex";
 }
 
 function messageForState(provider: ProviderId, state: BurnState, fiveUsed?: number, target?: { min: number; max: number }) {
