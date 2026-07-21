@@ -7,7 +7,7 @@ import { isDir, isFile } from "./fs-util.js";
 import { resolveKimiConfig } from "./kimi.js";
 import { buildPaths, providerLatestPath } from "./paths.js";
 import { notificationBackend } from "./notifier.js";
-import { isSwiftBarInstalled, swiftBarPluginPath } from "./menubar.js";
+import { isSwiftBarInstalled, isSwiftBarRunning, swiftBarPluginPath } from "./menubar.js";
 import { DoctorCheck } from "./types.js";
 
 function stableClaudeIngestHint() {
@@ -252,12 +252,16 @@ export function runDoctor(options: { dryRun?: boolean } = {}): DoctorCheck[] {
 
   const swiftBarInstalled = isSwiftBarInstalled();
   const swiftBarPlugin = swiftBarPluginPath(paths);
+  const pluginPresent = swiftBarInstalled && isFile(swiftBarPlugin.file);
+  const swiftBarRunning = pluginPresent && isSwiftBarRunning();
   checks.push({
     name: "Menu bar",
-    ok: swiftBarInstalled && isFile(swiftBarPlugin.file),
+    ok: pluginPresent,
     message: swiftBarInstalled
       ? isFile(swiftBarPlugin.file)
-        ? `SwiftBar plugin installed: ${swiftBarPlugin.file}`
+        ? swiftBarRunning
+          ? `SwiftBar plugin installed and SwiftBar running: ${swiftBarPlugin.file}`
+          : `SwiftBar plugin installed but SwiftBar is not running (menu bar item hidden); run: open -a SwiftBar`
         : `SwiftBar found; run coding-usage-bar menubar install`
       : "SwiftBar not found; install SwiftBar, then run coding-usage-bar menubar install",
   });

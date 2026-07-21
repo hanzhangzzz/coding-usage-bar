@@ -359,23 +359,73 @@ export function ensureSwiftBarInstalled(options: { dryRun?: boolean } = {}) {
   return ["Installed SwiftBar with Homebrew cask."];
 }
 
+export function isSwiftBarRunning() {
+  try {
+    execFileSync("pgrep", ["-x", "SwiftBar"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Poll until SwiftBar reaches the desired running state, or the timeout elapses.
+// Synchronous on purpose: openSwiftBar runs inside the synchronous installer flow.
+function waitForSwiftBar(wantRunning: boolean, timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (isSwiftBarRunning() === wantRunning) {
+      return true;
+    }
+    try {
+      execFileSync("sleep", ["0.2"], { stdio: "ignore" });
+    } catch {
+      // sleep should not fail; fall through to re-check.
+    }
+  }
+  return isSwiftBarRunning() === wantRunning;
+}
+
 export function openSwiftBar() {
   const appPath = swiftBarAppPath();
   if (!appPath) {
     return ["SwiftBar is not installed; skipping launch."];
   }
-  try {
-    execFileSync("osascript", ["-e", 'quit app "SwiftBar"'], { stdio: "ignore" });
-  } catch {
-    // SwiftBar may not be running yet.
+
+  const messages: string[] = [];
+
+  // 1. Quit and wait until the old instance is actually gone. `quit app` is
+  //    async; launching again before it finishes terminating can coalesce into
+  //    a no-op, and the visibility cleanup below only sticks while SwiftBar is
+  //    not running (cfprefsd lets a live SwiftBar rewrite the keys on quit).
+  if (isSwiftBarRunning()) {
+    try {
+      execFileSync("osascript", ["-e", 'quit app "SwiftBar"'], { stdio: "ignore" });
+    } catch {
+      // Ignore; the wait below reports the real state.
+    }
+    waitForSwiftBar(false, 5000);
   }
+
+  // 2. Clear any stale "hidden" status-item cache while SwiftBar is stopped so
+  //    the change survives the next launch instead of being clobbered.
+  messages.push(...clearSwiftBarStatusItemVisibility());
+
+  // 3. Launch and verify the process actually comes up before claiming success.
   try {
     execFileSync("open", [appPath], { stdio: "ignore" });
-    execFileSync("sleep", ["1"], { stdio: "ignore" });
-    return ["Opened SwiftBar.", ...clearSwiftBarStatusItemVisibility()];
   } catch (error) {
-    return [`SwiftBar installed, but launch failed: ${error instanceof Error ? error.message : String(error)}`];
+    messages.push(`SwiftBar installed, but launch failed: ${error instanceof Error ? error.message : String(error)}`);
+    return messages;
   }
+
+  if (waitForSwiftBar(true, 8000)) {
+    messages.push("Opened SwiftBar.");
+  } else {
+    messages.push(
+      "Launched SwiftBar, but it did not start within 8s. Open SwiftBar manually; if macOS prompts for Automation/Accessibility permission, allow it.",
+    );
+  }
+  return messages;
 }
 
 export function addSwiftBarToLoginItems(options: { dryRun?: boolean } = {}) {
