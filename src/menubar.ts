@@ -7,6 +7,7 @@ import { formatDurationUntil, formatProviderLabel } from "./format.js";
 import { buildPaths } from "./paths.js";
 import { stableNodeExecutable } from "./node-runtime.js";
 import { loadDisplayStatusSnapshot } from "./runtime.js";
+import { renderTitleImage, renderDropdownBars } from "./menubar-render.js";
 import { BurnState, RuntimePaths, StatusSnapshot } from "./types.js";
 
 const MARKER = "coding-usage-bar managed SwiftBar plugin";
@@ -77,155 +78,6 @@ const imageCache = new Map<string, string | null>();
 const TITLE_IMAGE_SCALE = 2;
 const titleImageCache = new Map<string, { image: string; width: number; height: number } | null>();
 
-const TITLE_IMAGE_SCRIPT = `
-ObjC.import('AppKit');
-ObjC.import('CoreGraphics');
-
-function drawImage(payload, variant, mode) {
-  var scale = payload.scale || 1;
-  var height = payload.height * scale;
-  var iconSize = payload.iconSize * scale;
-  var paddingX = payload.paddingX * scale;
-  var iconBarGap = payload.iconBarGap * scale;
-  var segmentGap = payload.segmentGap * scale;
-  var barWidth = payload.barWidth * scale;
-  var barHeight = payload.barHeight * scale;
-  var barGap = payload.barGap * scale;
-  var barRadius = payload.barRadius * scale;
-  var barMinFill = (payload.barMinFill || barRadius * 2) * scale;
-  var dividerW = 1 * scale;
-
-  var width = paddingX * 2;
-  payload.segments.forEach(function(seg, idx) {
-    if (idx > 0) width += segmentGap + dividerW + segmentGap;
-    width += (seg.iconPath ? iconSize + iconBarGap : 0) + barWidth;
-  });
-  width = Math.max(payload.minWidth * scale, width);
-
-  var rep = $.NSBitmapImageRep.alloc.initWithBitmapDataPlanesPixelsWidePixelsHighBitsPerSampleSamplesPerPixelHasAlphaIsPlanarColorSpaceNameBitmapFormatBytesPerRowBitsPerPixel(
-    null, width, height, 8, 4, true, false, $.NSDeviceRGBColorSpace, $.NSBitmapFormatAlphaPremultipliedLast, 0, 0
-  );
-  var nsctx = $.NSGraphicsContext.graphicsContextWithBitmapImageRep(rep);
-  $.NSGraphicsContext.setCurrentContext(nsctx);
-  nsctx.setShouldAntialias(true);
-  nsctx.setImageInterpolation($.NSImageInterpolationHigh);
-  var cg = nsctx.CGContext;
-
-  function setFill(hex, alpha) {
-    var v = hex.replace('#', '');
-    $.CGContextSetRGBFillColor(cg,
-      parseInt(v.slice(0, 2), 16) / 255,
-      parseInt(v.slice(2, 4), 16) / 255,
-      parseInt(v.slice(4, 6), 16) / 255,
-      alpha !== undefined ? alpha : 1);
-  }
-
-  function fillRoundedRect(rx, ry, rw, rh, rr) {
-    var p = $.CGPathCreateWithRoundedRect($.CGRectMake(rx, ry, rw, rh), rr, rr, null);
-    $.CGContextAddPath(cg, p);
-    $.CGContextFillPath(cg);
-  }
-
-  var x = paddingX;
-  var iconY = Math.floor((height - iconSize) / 2);
-
-  payload.segments.forEach(function(seg, idx) {
-    if (idx > 0) {
-      x += segmentGap;
-      setFill(variant.dividerColor, variant.dividerAlpha);
-      $.CGContextFillRect(cg, $.CGRectMake(x, Math.floor(height * 0.2), dividerW, Math.floor(height * 0.6)));
-      x += dividerW + segmentGap;
-    }
-    var iconFile = (mode === 'dark' && seg.iconPathDark) ? seg.iconPathDark : seg.iconPath;
-    if (iconFile) {
-      var icon = $.NSImage.alloc.initWithContentsOfFile($(iconFile));
-      if (icon) {
-        icon.drawInRectFromRectOperationFraction(
-          $.NSMakeRect(x, iconY, iconSize, iconSize),
-          $.NSZeroRect, $.NSCompositingOperationSourceOver, 1
-        );
-      }
-      x += iconSize + iconBarGap;
-    }
-    var bars = seg.bars || [];
-    var totalH = bars.length * barHeight + Math.max(0, bars.length - 1) * barGap;
-    var barY = Math.floor((height + totalH) / 2) - barHeight;
-    for (var i = 0; i < bars.length; i++) {
-      setFill(variant.barBgColor, variant.barBgAlpha);
-      fillRoundedRect(x, barY, barWidth, barHeight, barRadius);
-      if (bars[i].pct > 0) {
-        var pct = Math.min(bars[i].pct, 100);
-        var fw = Math.max(barMinFill, Math.round(barWidth * pct / 100));
-        setFill(bars[i][mode + 'Color'], 1);
-        fillRoundedRect(x, barY, fw, barHeight, barRadius);
-      }
-      barY -= barHeight + barGap;
-    }
-    x += barWidth;
-  });
-
-  var png = rep.representationUsingTypeProperties($.NSBitmapImageFileTypePNG, $.NSDictionary.alloc.init);
-  return {
-    image: ObjC.unwrap(png.base64EncodedStringWithOptions(0)),
-    width: Math.ceil(width / scale),
-    height: payload.height,
-  };
-}
-
-function run(argv) {
-  var payload = JSON.parse(argv[0]);
-  return JSON.stringify({
-    light: drawImage(payload, payload.light, 'light'),
-    dark: drawImage(payload, payload.dark, 'dark'),
-  });
-}
-`;
-
-const DROPDOWN_BAR_SCRIPT = `
-ObjC.import('AppKit');
-ObjC.import('CoreGraphics');
-
-function parseHex(hex) {
-  var v = hex.replace('#', '');
-  return [parseInt(v.slice(0,2),16)/255, parseInt(v.slice(2,4),16)/255, parseInt(v.slice(4,6),16)/255];
-}
-
-function makeBar(bw, bh, br, pct, fc, bgHex, bgAlpha) {
-  var rep = $.NSBitmapImageRep.alloc.initWithBitmapDataPlanesPixelsWidePixelsHighBitsPerSampleSamplesPerPixelHasAlphaIsPlanarColorSpaceNameBitmapFormatBytesPerRowBitsPerPixel(
-    null, bw, bh, 8, 4, true, false, $.NSDeviceRGBColorSpace, $.NSBitmapFormatAlphaPremultipliedLast, 0, 0);
-  var nsctx = $.NSGraphicsContext.graphicsContextWithBitmapImageRep(rep);
-  $.NSGraphicsContext.setCurrentContext(nsctx);
-  nsctx.setShouldAntialias(true);
-  var cg = nsctx.CGContext;
-  var bg = parseHex(bgHex);
-  $.CGContextSetRGBFillColor(cg, bg[0], bg[1], bg[2], bgAlpha);
-  var bp = $.CGPathCreateWithRoundedRect($.CGRectMake(0,0,bw,bh), br, br, null);
-  $.CGContextAddPath(cg, bp); $.CGContextFillPath(cg);
-  if (pct > 0) {
-    var fw = Math.max(br*2, Math.round(bw * Math.min(pct,100) / 100));
-    $.CGContextSetRGBFillColor(cg, fc[0], fc[1], fc[2], 1);
-    var fp = $.CGPathCreateWithRoundedRect($.CGRectMake(0,0,fw,bh), br, br, null);
-    $.CGContextAddPath(cg, fp); $.CGContextFillPath(cg);
-  }
-  var png = rep.representationUsingTypeProperties($.NSBitmapImageFileTypePNG, $.NSDictionary.alloc.init);
-  return ObjC.unwrap(png.base64EncodedStringWithOptions(0));
-}
-
-function run(argv) {
-  var p = JSON.parse(argv[0]);
-  var s = p.scale || 2;
-  var bw = p.barWidth * s, bh = p.barHeight * s, br = p.barRadius * s;
-  var results = [];
-  for (var i = 0; i < p.bars.length; i++) {
-    var bar = p.bars[i];
-    var lc = parseHex(bar.lightColor), dc = parseHex(bar.darkColor);
-    var li = makeBar(bw, bh, br, bar.pct, lc, p.light.barBgColor, p.light.barBgAlpha);
-    var di = makeBar(bw, bh, br, bar.pct, dc, p.dark.barBgColor, p.dark.barBgAlpha);
-    results.push(li + ',' + di);
-  }
-  return JSON.stringify({images: results, width: p.barWidth, height: p.barHeight});
-}
-`;
 
 const dropdownBarCache = new Map<string, { images: string[]; width: number; height: number } | null>();
 
@@ -248,11 +100,7 @@ function renderDropdownBarImages(bars: Array<{ pct: number; lightColor: string; 
     return cached ? cached.images.map((img) => ({ image: img, width: cached.width, height: cached.height })) : [];
   }
   try {
-    const output = execFileSync("/usr/bin/osascript", ["-l", "JavaScript", "-e", DROPDOWN_BAR_SCRIPT, cacheKey], {
-      encoding: "utf8",
-      timeout: 3000,
-    }).trim();
-    const result = JSON.parse(output) as { images: string[]; width: number; height: number };
+    const result = renderDropdownBars(payload);
     dropdownBarCache.set(cacheKey, result);
     return result.images.map((img) => ({ image: img, width: result.width, height: result.height }));
   } catch {
@@ -601,14 +449,7 @@ function titleImageValue(providers: StatusSnapshot["providers"]) {
   }
 
   try {
-    const output = execFileSync("/usr/bin/osascript", ["-l", "JavaScript", "-e", TITLE_IMAGE_SCRIPT, cacheKey], {
-      encoding: "utf8",
-      timeout: 2500,
-    }).trim();
-    const images = JSON.parse(output) as {
-      light?: { image?: string; width?: number; height?: number };
-      dark?: { image?: string; width?: number; height?: number };
-    };
+    const images = renderTitleImage(payload);
     const value = images.light?.image && images.dark?.image && images.light.width && images.light.height
       ? {
         image: `${images.light.image},${images.dark.image}`,
