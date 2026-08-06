@@ -19,6 +19,23 @@ function buildProviderMeta(usage: ProviderUsage, generatedAt: Date, staleAfterSe
   };
 }
 
+// Coarse buckets keep the message stable between renders: an exact age changes
+// every second, which would defeat SwiftBar's unchanged-content guard and force
+// a menu rebuild each refresh while the data itself is unchanged.
+function staleAgeLabel(ageSeconds: number) {
+  const buckets = [
+    { seconds: 86_400, label: "1d" },
+    { seconds: 43_200, label: "12h" },
+    { seconds: 10_800, label: "3h" },
+    { seconds: 3_600, label: "1h" },
+    { seconds: 1_800, label: "30m" },
+    { seconds: 600, label: "10m" },
+    { seconds: 60, label: "1m" },
+  ];
+  const hit = buckets.find((bucket) => ageSeconds >= bucket.seconds);
+  return hit ? `over ${hit.label}` : "under 1m";
+}
+
 function staleIssuesFor(providers: StatusSnapshot["providers"]): StatusIssue[] {
   return providers
     .filter((provider) => provider.meta.stale)
@@ -26,7 +43,7 @@ function staleIssuesFor(providers: StatusSnapshot["providers"]): StatusIssue[] {
       provider: provider.usage.provider,
       severity: "warning",
       code: "USAGE_STALE",
-      message: `${provider.usage.provider} usage is stale; latest observation is ${provider.meta.ageSeconds}s old.`,
+      message: `${provider.usage.provider} usage is stale; latest observation is ${staleAgeLabel(provider.meta.ageSeconds)} old.`,
     }));
 }
 

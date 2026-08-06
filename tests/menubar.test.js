@@ -181,6 +181,29 @@ test("renderMenuBar shows current Codex 7d usage without a synthetic 5h row", ()
   assert.match(output, /Codex 5h usage unavailable; showing 7d only\./);
 });
 
+test("renderMenuBar output is byte-identical across renders while the snapshot is unchanged", () => {
+  // The two render times are 90s apart and cross a minute boundary: any
+  // countdown or wall-clock age text that sneaks back into the output makes
+  // these renders differ, which defeats SwiftBar's unchanged-content guard and
+  // repaints the menu bar every minute (WindowServer spikes) even though the
+  // usage data is unchanged.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-render-"));
+  const paths = buildPaths(home);
+  const first = renderMenuBar(snapshot, paths, new Date("2026-05-08T01:00:00.000Z"));
+  const second = renderMenuBar(snapshot, paths, new Date("2026-05-08T01:01:30.000Z"));
+  assert.equal(first, second);
+  assert.doesNotMatch(first, /Data age/);
+  assert.match(first, /Data fresh/);
+});
+
+test("renderMenuBar marks elapsed reset windows as due instead of a countdown", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-render-"));
+  const paths = buildPaths(home);
+  const output = renderMenuBar(snapshot, paths, new Date("2026-05-20T00:00:00.000Z"));
+  assert.match(output, /reset due/);
+  assert.doesNotMatch(output, /reset \d+m/);
+});
+
 test("swiftBarStatusItemVisibilityKeys finds hidden status item cache keys", () => {
   const output = `{
     MakePluginExecutable = 1;

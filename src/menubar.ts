@@ -3,7 +3,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { ensureDir, isFile } from "./fs-util.js";
-import { formatDurationUntil, formatProviderLabel } from "./format.js";
+import { formatProviderLabel, formatResetTime } from "./format.js";
 import { buildPaths } from "./paths.js";
 import { stableNodeExecutable } from "./node-runtime.js";
 import { loadDisplayStatusSnapshot } from "./runtime.js";
@@ -496,10 +496,10 @@ function coloredMeter(usedPercent: number, fillColor: string, width = METER_WIDT
     + (empty > 0 ? ansiRGB(MUTED_COLOR, "░".repeat(empty)) : "");
 }
 
-function usageLine(label: "5h" | "7d", usedPercent: number, resetsAt: string, color: string, barImage?: { image: string; width: number; height: number }) {
+function usageLine(label: "5h" | "7d", usedPercent: number, resetsAt: string, color: string, now: Date, barImage?: { image: string; width: number; height: number }) {
   const percent = `${Math.round(usedPercent).toString().padStart(3)}%`;
   if (barImage) {
-    return line(`${label}  ${percent}  reset ${formatDurationUntil(resetsAt)}`, {
+    return line(`${label}  ${percent}  reset ${formatResetTime(resetsAt, now)}`, {
       image: barImage.image,
       width: barImage.width,
       height: barImage.height,
@@ -509,7 +509,7 @@ function usageLine(label: "5h" | "7d", usedPercent: number, resetsAt: string, co
     });
   }
   const bar = coloredMeter(usedPercent, color);
-  return line(`${label}  ${bar}  ${ansiRGB(color, percent)}  reset ${formatDurationUntil(resetsAt)}`, {
+  return line(`${label}  ${bar}  ${ansiRGB(color, percent)}  reset ${formatResetTime(resetsAt, now)}`, {
     ansi: true,
     font: ROW_FONT,
     size: 12,
@@ -540,8 +540,8 @@ function titleIconParams() {
   return { sfimage: "flame.fill", sfcolor: RAW_COLOR };
 }
 
-function maxProviderAge(snapshot: StatusSnapshot) {
-  return Math.max(0, ...snapshot.providers.map((item) => item.meta.ageSeconds));
+function anyProviderStale(snapshot: StatusSnapshot) {
+  return snapshot.providers.some((item) => item.meta.stale);
 }
 
 function issueLabel(code: string) {
@@ -569,7 +569,11 @@ function issueLabel(code: string) {
   return code.replaceAll("_", " ").toLowerCase();
 }
 
-export function renderMenuBar(snapshot: StatusSnapshot = loadDisplayStatusSnapshot(), paths: RuntimePaths = buildPaths()) {
+// `now` only feeds low-frequency decisions (reset due/day prefix). The output
+// must stay byte-identical across renders while the snapshot is unchanged, so
+// SwiftBar's content guard can skip the menu rebuild and menu bar repaint;
+// never render anything derived from wall-clock age or countdowns here.
+export function renderMenuBar(snapshot: StatusSnapshot = loadDisplayStatusSnapshot(), paths: RuntimePaths = buildPaths(), now: Date = new Date()) {
   const compact = readCompactMode(paths);
   const providers = titleProviders(snapshot);
   const title = providers.map(titleSegment).join(` ${TITLE_SEPARATOR} `);
@@ -626,7 +630,7 @@ export function renderMenuBar(snapshot: StatusSnapshot = loadDisplayStatusSnapsh
       sfcolor: STATE_COLOR[topState],
       badge: snapshot.profile.toUpperCase(),
     }),
-    muted(`Data age ${maxProviderAge(snapshot)}s`),
+    muted(anyProviderStale(snapshot) ? "Data stale" : "Data fresh"),
     "---",
   ];
 
@@ -680,10 +684,10 @@ export function renderMenuBar(snapshot: StatusSnapshot = loadDisplayStatusSnapsh
       badge: providerBadge(item),
     }));
     if (five) {
-      lines.push(usageLine("5h", five.usedPercent, five.resetsAt, TEXT_COLOR, dropdownBars[barIdx++]));
+      lines.push(usageLine("5h", five.usedPercent, five.resetsAt, TEXT_COLOR, now, dropdownBars[barIdx++]));
     }
     if (seven) {
-      lines.push(usageLine("7d", seven.usedPercent, seven.resetsAt, TEXT_COLOR, dropdownBars[barIdx++]));
+      lines.push(usageLine("7d", seven.usedPercent, seven.resetsAt, TEXT_COLOR, now, dropdownBars[barIdx++]));
     }
     lines.push(muted(targetLabel(item)));
     lines.push(line(item.analysis.message, { color: MUTED_COLOR, size: 12, length: 84 }));

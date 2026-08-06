@@ -14,6 +14,32 @@ export function formatDurationUntil(iso: string, now = new Date()) {
   return `${mins}m`;
 }
 
+// Absolute reset label for surfaces that re-render on a timer (SwiftBar).
+// A countdown changes every minute even when the underlying usage data is
+// unchanged, which forces SwiftBar to rebuild the menu and repaint the menu
+// bar on every refresh. An absolute clock time is a pure function of the
+// reset timestamp, so unchanged data renders to identical bytes and SwiftBar
+// skips the update entirely. `now` only decides "due" and whether the day
+// prefix is needed, both of which change at most once per window/day.
+export function formatResetTime(iso: string, now = new Date()) {
+  const resetMs = Date.parse(iso);
+  if (!Number.isFinite(resetMs)) {
+    return "due";
+  }
+  if (resetMs <= now.getTime()) {
+    return "due";
+  }
+  const reset = new Date(resetMs);
+  const sameDay = reset.getFullYear() === now.getFullYear()
+    && reset.getMonth() === now.getMonth()
+    && reset.getDate() === now.getDate();
+  const clock = `${String(reset.getHours()).padStart(2, "0")}:${String(reset.getMinutes()).padStart(2, "0")}`;
+  if (sameDay) {
+    return clock;
+  }
+  return `${reset.getMonth() + 1}/${reset.getDate()} ${clock}`;
+}
+
 function windowLabel(window: UsageWindow) {
   return window.name === "five_hour" ? "5h" : "7d";
 }
