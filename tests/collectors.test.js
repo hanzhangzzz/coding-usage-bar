@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { usageFromClaudeStatusLine } from "../dist/claude.js";
 import { collectCodexUsage } from "../dist/codex.js";
-import { readClaudeLanesKimiConfig, resolveKimiConfig, usageFromKimiUsages } from "../dist/kimi.js";
+import { collectKimiUsage, probeKimiAccessFrozen, readClaudeLanesKimiConfig, resolveKimiConfig, usageFromKimiUsages } from "../dist/kimi.js";
 import { usageFromMinimaxQuota } from "../dist/minimax.js";
 
 test("usageFromClaudeStatusLine normalizes status line rate limits", () => {
@@ -412,5 +412,110 @@ test("resolveKimiConfig prefers config.json key and falls back to claude-lanes",
   assert.deepEqual(resolveKimiConfig(undefined, home), {
     baseUrl: "https://api.kimi.com/coding/",
     apiKey: "sk-kimi-lanes",
+  });
+});
+
+const KIMI_USAGES_BODY = JSON.stringify({
+  user: { membership: { level: "LEVEL_INTERMEDIATE" } },
+  usage: { limit: "100", used: "5", remaining: "95", resetTime: "2026-08-23T02:38:49.743753Z" },
+  limits: [
+    {
+      window: { duration: 300, timeUnit: "TIME_UNIT_MINUTE" },
+      detail: { limit: "100", used: "25", remaining: "75", resetTime: "2026-08-17T06:38:49.743753Z" },
+    },
+  ],
+});
+
+const KIMI_FROZEN_BODY = JSON.stringify({
+  error: {
+    message: "You've reached your usage limit for this billing cycle.",
+    type: "access_terminated_error",
+  },
+});
+
+function withMockFetch(handlers, fn) {
+  const originalFetch = globalThis.fetch;
+  let call = 0;
+  globalThis.fetch = async (url, init) => {
+    const handler = handlers[Math.min(call, handlers.length - 1)];
+    call += 1;
+    return handler(String(url), init);
+  };
+  return Promise.resolve(fn()).finally(() => {
+    globalThis.fetch = originalFetch;
+  });
+}
+
+test("probeKimiAccessFrozen detects the billing-cycle 403 freeze", async () => {
+  await withMockFetch([() => new Response(KIMI_FROZEN_BODY, { status: 403 })], async () => {
+    assert.equal(await probeKimiAccessFrozen({ apiKey: "sk-kimi-test" }), true);
+  });
+});
+
+test("probeKimiAccessFrozen returns false on model-not-found (healthy account)", async () => {
+  await withMockFetch([
+    () => new Response(JSON.stringify({ error: { type: "model_not_found_error" } }), { status: 404 }),
+  ], async () => {
+    assert.equal(await probeKimiAccessFrozen({ apiKey: "sk-kimi-test" }), false);
+  });
+});
+
+test("probeKimiAccessFrozen returns false on unrelated 403 errors", async () => {
+  await withMockFetch([
+    () => new Response(JSON.stringify({ error: { type: "permission_error" } }), { status: 403 }),
+  ], async () => {
+    assert.equal(await probeKimiAccessFrozen({ apiKey: "sk-kimi-test" }), false);
+  });
+});
+
+test("collectKimiUsage marks blocked while keeping 5h/7d window numbers", async () => {
+  const calls = [];
+  await withMockFetch([
+    (url) => {
+      calls.push(url);
+      return new Response(KIMI_USAGES_BODY, { status: 200 });
+    },
+    (url, init) => {
+      calls.push(url);
+      const body = JSON.parse(init.body);
+      assert.equal(body.model, "coding-usage-bar-access-probe");
+      assert.equal(body.max_tokens, 1);
+      return new Response(KIMI_FROZEN_BODY, { status: 403 });
+    },
+  ], async () => {
+    const usage = await collectKimiUsage({ apiKey: "sk-kimi-test" });
+    assert.equal(usage.provider, "kimi");
+    assert.ok(usage.blocked, "blocked marker is set");
+    assert.match(usage.blocked.reason, /monthly quota/);
+    assert.equal(usage.windows.find((w) => w.name === "five_hour").usedPercent, 25);
+    assert.equal(usage.windows.find((w) => w.name === "seven_day").usedPercent, 5);
+    assert.deepEqual(calls, [
+      "https://api.kimi.com/coding/v1/usages",
+      "https://api.kimi.com/coding/v1/chat/completions",
+    ]);
+  });
+});
+
+test("collectKimiUsage stays unblocked when the probe request errors", async () => {
+  await withMockFetch([
+    () => new Response(KIMI_USAGES_BODY, { status: 200 }),
+    () => {
+      throw new Error("network down");
+    },
+  ], async () => {
+    const usage = await collectKimiUsage({ apiKey: "sk-kimi-test" });
+    assert.equal(usage.blocked, undefined);
+    assert.equal(usage.windows.find((w) => w.name === "five_hour").usedPercent, 25);
+  });
+});
+
+test("collectKimiUsage stays unblocked when the probe reports a healthy account", async () => {
+  await withMockFetch([
+    () => new Response(KIMI_USAGES_BODY, { status: 200 }),
+    () => new Response(JSON.stringify({ error: { type: "model_not_found_error" } }), { status: 404 }),
+  ], async () => {
+    const usage = await collectKimiUsage({ apiKey: "sk-kimi-test" });
+    assert.equal(usage.blocked, undefined);
+    assert.equal(usage.windows.find((w) => w.name === "five_hour").usedPercent, 25);
   });
 });

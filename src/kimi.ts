@@ -179,6 +179,42 @@ export function resolveKimiConfig(config: KimiConfig | undefined, homeDir = os.h
   };
 }
 
+// Kimi's monthly billing-cycle quota can freeze all chat access while
+// /v1/usages still reports headroom in the 5h/weekly windows (the monthly
+// number itself is not exposed on any API-key-authenticated endpoint; it only
+// shows up in the logged-in web console). Detect the freeze with a
+// zero-cost probe: the billing-cycle gate runs before model validation, so a
+// chat request naming a nonexistent model returns 403 access_terminated_error
+// when frozen — and a "model not found" error (no inference, no quota use)
+// when healthy.
+const ACCESS_PROBE_MODEL = "coding-usage-bar-access-probe";
+
+export async function probeKimiAccessFrozen(config: KimiConfig): Promise<boolean> {
+  const baseUrl = (config.baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, "");
+  const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${config.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: ACCESS_PROBE_MODEL,
+      max_tokens: 1,
+      messages: [{ role: "user", content: "hi" }],
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (response.status !== 403) {
+    return false;
+  }
+  try {
+    const body = (await response.json()) as { error?: { type?: string } };
+    return body?.error?.type === "access_terminated_error";
+  } catch {
+    return false;
+  }
+}
+
 export async function collectKimiUsage(config: KimiConfig): Promise<ProviderUsage> {
   if (!config.apiKey) {
     throw new Error("Kimi API key not configured. Edit ~/.coding-usage-bar/config.json to set kimi.apiKey, or configure a kimi.com lane in ~/.config/claude-lanes/config.env.");
@@ -192,6 +228,16 @@ export async function collectKimiUsage(config: KimiConfig): Promise<ProviderUsag
 
   if (!usage) {
     throw new Error("Kimi usages response did not contain expected 5h/7d quota data");
+  }
+
+  // The probe must never fail the collection: on network errors the window
+  // data stays valid and simply renders unblocked.
+  try {
+    if (await probeKimiAccessFrozen(config)) {
+      usage.blocked = { reason: "monthly quota exhausted; access frozen until the next billing cycle" };
+    }
+  } catch {
+    // Probe unavailable; keep the usage data as-is.
   }
 
   return usage;

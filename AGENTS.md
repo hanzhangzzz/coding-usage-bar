@@ -95,6 +95,14 @@ ls -la "$PLUGINDIR/coding-usage-bar.1m.js"
 
 安装器变更必须先用临时 `HOME`、临时 SwiftBar 插件目录和隔离 npm prefix 做端到端安装验证，不能让测试读写用户真实的 `~/.claude`、`~/.coding-usage-bar` 或 SwiftBar 插件。真实安装和 npm 发布属于外部状态变更，必须得到用户明确确认。验证后不要提交 `node_modules/`、`dist/` 或 `.tgz`。
 
+## Kimi 月度配额冻结（billing cycle freeze）
+
+- Kimi 有三层配额：5h 滚动窗口、周配额（`/v1/usages` 顶层 `usage`，从订阅日起每 7 天刷新）、月度 billing-cycle 总额。月度总额用尽时所有 chat 请求返回 403 `access_terminated_error`，但 `/v1/usages` 的 5h/周窗口照常显示有余量——这两个数字是准确的，不要"修正"它们。
+- 月度总额的进度数字不存在于任何 API key 可访问的端点：`totalQuota` 对购买型账号（`subType: TYPE_PURCHASE`）是空对象，社区实测（quotas crate）即使非空也只是二进制冻结标志（used=1、remaining 粘滞、limit 无意义）；官方 kimi-cli 的 `/usage` 也不解析它；准确数字只在登录态网页 console（kimi.com/code/console）。
+- `collectKimiUsage` 用零成本探测检测冻结：POST chat/completions 带不存在的 model 名 + `max_tokens:1`。限额门在 model 校验之前执行，冻结时返回 403 `access_terminated_error`（0 token、0 配额消耗），健康时返回 404 model not found（不产生 usage）。只有 403 且 `error.type === "access_terminated_error"` 才判定冻结。
+- 冻结时在 `ProviderUsage.blocked` 标记 reason；`usage.windows` 的 5h/7d 数值必须保持原样，展示层只把该 provider 的 bars 渲染成灰色（MUTED_COLOR）并显示 Blocked/Frozen。探测请求失败（网络/超时）绝不能影响 usage 采集，静默保持未冻结状态。
+- 该机制为 Kimi 独有，不要给其他 provider 引入 blocked 探测或渲染分支。
+
 ## 发布门禁
 
 任何 `npm publish` 之前必须依次通过：

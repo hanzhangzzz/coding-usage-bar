@@ -375,7 +375,9 @@ function titleBars(provider: StatusSnapshot["providers"][number]) {
     return [{ pct: isAvailable ? 100 : 0, lightColor, darkColor }];
   }
   const state = provider.analysis.state;
-  const [lightColor, darkColor] = STATE_COLOR[state].split(",");
+  // Blocked (Kimi billing-cycle freeze): grey bars say "no access" without
+  // lying about the 5h/7d window numbers.
+  const [lightColor, darkColor] = (provider.usage.blocked ? MUTED_COLOR : STATE_COLOR[state]).split(",");
   const fiveHour = provider.analysis.fiveHour;
   const sevenDay = provider.analysis.sevenDay;
   const bars: Array<{ pct: number; lightColor: string; darkColor: string }> = [];
@@ -639,7 +641,7 @@ export function renderMenuBar(snapshot: StatusSnapshot = loadDisplayStatusSnapsh
     if (item.usage.balance && item.usage.windows.length === 0) {
       continue;
     }
-    const [lc, dc] = STATE_COLOR[item.analysis.state].split(",");
+    const [lc, dc] = (item.usage.blocked ? MUTED_COLOR : STATE_COLOR[item.analysis.state]).split(",");
     const f = windowByName(item, "five_hour");
     const s = windowByName(item, "seven_day");
     if (f) {
@@ -677,17 +679,20 @@ export function renderMenuBar(snapshot: StatusSnapshot = loadDisplayStatusSnapsh
       continue;
     }
 
-    lines.push(line(`${formatProviderLabel(item.usage.provider)}  ${STATE_LABEL[item.analysis.state]}`, {
+    lines.push(line(`${formatProviderLabel(item.usage.provider)}  ${item.usage.blocked ? "Blocked" : STATE_LABEL[item.analysis.state]}`, {
       ...providerIconParams(item.usage.provider),
       color: TEXT_COLOR,
       size: 14,
-      badge: providerBadge(item),
+      badge: item.usage.blocked ? "Frozen" : providerBadge(item),
     }));
     if (five) {
       lines.push(usageLine("5h", five.usedPercent, five.resetsAt, TEXT_COLOR, now, dropdownBars[barIdx++]));
     }
     if (seven) {
       lines.push(usageLine("7d", seven.usedPercent, seven.resetsAt, TEXT_COLOR, now, dropdownBars[barIdx++]));
+    }
+    if (item.usage.blocked) {
+      lines.push(muted(`Blocked  ${item.usage.blocked.reason}. 5h/7d numbers above still reflect the window quotas.`));
     }
     lines.push(muted(targetLabel(item)));
     lines.push(line(item.analysis.message, { color: MUTED_COLOR, size: 12, length: 84 }));

@@ -26,6 +26,13 @@ export interface ProviderUsage {
     currency: string;
     isAvailable: boolean;
   };
+  // Kimi-only: the billing-cycle (monthly) quota can freeze access while the
+  // 5h/weekly windows still report headroom, and that quota is not exposed by
+  // /v1/usages at all. When set, window numbers stay untouched; display layers
+  // render the bars in a blocked style.
+  blocked?: {
+    reason: string;
+  };
 }
 
 export interface BurnAnalysis {

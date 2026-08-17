@@ -261,3 +261,50 @@ test("renderMenuBar shows Expand toggle in compact mode", () => {
     toggleCompactMode(paths);
   }
 });
+
+const blockedKimiProvider = {
+  usage: {
+    provider: "kimi",
+    source: "test",
+    observedAt: "2026-08-17T05:44:09.817Z",
+    blocked: { reason: "monthly quota exhausted; access frozen until the next billing cycle" },
+    windows: [
+      { name: "five_hour", windowMinutes: 300, usedPercent: 25, resetsAt: "2026-08-17T06:38:49.743753Z" },
+      { name: "seven_day", windowMinutes: 10080, usedPercent: 5, resetsAt: "2026-08-23T02:38:49.743753Z" },
+    ],
+  },
+  analysis: {
+    provider: "kimi",
+    state: "OVER_BURN",
+    profile: "low",
+    observedAt: "2026-08-17T05:44:09.817Z",
+    fiveHour: { name: "five_hour", windowMinutes: 300, usedPercent: 25, resetsAt: "2026-08-17T06:38:49.743753Z" },
+    sevenDay: { name: "seven_day", windowMinutes: 10080, usedPercent: 5, resetsAt: "2026-08-23T02:38:49.743753Z" },
+    message: "Kimi 5h usage is above target.",
+  },
+  meta: {
+    source: "test",
+    observedAt: "2026-08-17T05:44:09.817Z",
+    ageSeconds: 0,
+    stale: false,
+  },
+};
+
+test("renderMenuBar shows Blocked for a frozen kimi account and keeps window numbers", () => {
+  const output = renderMenuBar({
+    ...snapshot,
+    providers: [...snapshot.providers, blockedKimiProvider],
+  });
+  assert.match(output, /Kimi  Blocked/);
+  assert.match(output, /badge=Frozen/);
+  assert.match(output, /Blocked  monthly quota exhausted; access frozen until the next billing cycle/);
+  // Window rows must stay untouched: same numbers, same reset labels.
+  assert.match(output, /5h {2} 25%/);
+  assert.match(output, /7d {2} {2}5%/);
+});
+
+test("renderMenuBar keeps the burn-state label for unblocked providers", () => {
+  const output = renderMenuBar(snapshot);
+  assert.doesNotMatch(output, /badge=Frozen/);
+  assert.doesNotMatch(output, /monthly quota exhausted/);
+});
