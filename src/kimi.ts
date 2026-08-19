@@ -38,11 +38,16 @@ function asNumber(value: string | number | undefined): number | null {
 
 // Kimi reports limit/used/remaining per window. Prefer the used/limit ratio;
 // when limit is 0 or missing, derive the total from used + remaining instead of
-// falling back to 0% while a real signal exists.
+// falling back to 0% while a real signal exists. Kimi also omits zero-valued
+// fields entirely (proto3 JSON): a fresh window with no usage reports only
+// limit + remaining, so derive used from limit - remaining instead of failing.
 function percentFromDetail(detail: KimiQuotaDetail): number | null {
   const limit = asNumber(detail.limit);
-  const used = asNumber(detail.used);
+  let used = asNumber(detail.used);
   const remaining = asNumber(detail.remaining);
+  if (used === null && limit !== null && remaining !== null) {
+    used = Math.max(0, limit - remaining);
+  }
   if (limit !== null && limit > 0 && used !== null) {
     return Math.max(0, Math.min(100, (used / limit) * 100));
   }

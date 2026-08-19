@@ -307,6 +307,55 @@ test("usageFromKimiUsages accepts numeric quota values and derives total from us
   assert.equal(sevenDay.usedPercent, 30, "7d used = 3/(3+7) * 100 when limit is 0");
 });
 
+test("usageFromKimiUsages derives used from limit - remaining when Kimi omits the zero-valued used field", () => {
+  // Fresh billing cycle / fresh 5h window with no usage yet: Kimi (proto3 JSON)
+  // omits zero-valued fields, so the response only carries limit + remaining.
+  const usage = usageFromKimiUsages({
+    user: { membership: { level: "LEVEL_INTERMEDIATE" } },
+    usage: { limit: "100", remaining: "100", resetTime: "2026-08-23T02:38:49.743753Z" },
+    limits: [
+      {
+        window: { duration: 300, timeUnit: "TIME_UNIT_MINUTE" },
+        detail: { limit: "100", remaining: "100", resetTime: "2026-08-19T08:38:49.743753Z" },
+      },
+    ],
+  }, { source: "https://api.kimi.com/coding/v1/usages" });
+
+  assert.ok(usage, "expected usage to be returned");
+  const fiveHour = usage.windows.find((w) => w.name === "five_hour");
+  const sevenDay = usage.windows.find((w) => w.name === "seven_day");
+  assert.equal(fiveHour.usedPercent, 0, "5h used derived as limit - remaining = 0");
+  assert.equal(sevenDay.usedPercent, 0, "7d used derived as limit - remaining = 0");
+});
+
+test("usageFromKimiUsages derives partial usage when used is omitted but quota is consumed", () => {
+  const usage = usageFromKimiUsages({
+    usage: { limit: "100", used: "2", remaining: "98", resetTime: "2026-08-23T02:38:49.743753Z" },
+    limits: [
+      {
+        window: { duration: 300, timeUnit: "TIME_UNIT_MINUTE" },
+        detail: { limit: "100", remaining: "25", resetTime: "2026-08-19T08:38:49.743753Z" },
+      },
+    ],
+  }, { source: "https://api.kimi.com/coding/v1/usages" });
+
+  assert.ok(usage, "expected usage to be returned");
+  const fiveHour = usage.windows.find((w) => w.name === "five_hour");
+  assert.equal(fiveHour.usedPercent, 75, "5h used derived as (100 - 25) / 100 * 100");
+});
+
+test("usageFromKimiUsages still returns null when used is omitted and limit cannot anchor a ratio", () => {
+  assert.equal(usageFromKimiUsages({
+    usage: { limit: "100", used: "2", remaining: "98", resetTime: "2026-08-23T02:38:49.743753Z" },
+    limits: [
+      {
+        window: { duration: 300, timeUnit: "TIME_UNIT_MINUTE" },
+        detail: { remaining: "90", resetTime: "2026-08-19T08:38:49.743753Z" },
+      },
+    ],
+  }, { source: "https://api.kimi.com/coding/v1/usages" }), null, "used omitted with no limit has no real signal");
+});
+
 test("usageFromKimiUsages falls back to the shortest window when no 300-minute entry exists", () => {
   const usage = usageFromKimiUsages({
     usage: { limit: "100", used: "1", remaining: "99", resetTime: "2026-07-26T02:38:49.743753Z" },
