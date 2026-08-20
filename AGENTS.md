@@ -71,6 +71,7 @@ Coding Usage Bar 是独立开源项目，也是本工具的唯一事实源。它
 - 每个 provider 的 collector 必须**完整读取 API 返回的 usage 信号**。不能只解析一类信号就把另一种信号当 0 处理。
 - MiniMax 的 `/v1/token_plan/remains` 对每个 model 返回两套信号：count 维度（`current_*_usage_count` / `current_*_total_count`，适用于 video 等配额计数型）和 percent 维度（`current_*_remaining_percent`，0-100，适用于 general 这种信用消耗型）。`general` 的 `total_count` 永远是 0，必须从 `100 - remaining_percent` 推出 used%；如果只看 count 维度，credit-based 账户会永远显示 0%。
 - 同样的原则适用于其它可能扩展 percent 字段的 provider：解析时优先取真实信号，不要因为一种信号缺省就 0% 兜底，而要看另一种信号是否给出真实值。
+- GLM 的 `TOKENS_LIMIT` 在零用量新窗口时**整个省略 `nextResetTime`**（与 Kimi 省略零值 `used` 同款坑）：不能对该字段裸调 `new Date(...).toISOString()`（抛 `Invalid time value` 会毁掉整次 live 采集），也不能因缺 reset time 丢弃真实的 0% 信号。窗口识别按 shape（unit 3 + number 5 = 5h，unit 6 + number 1 = 周窗口），不能只按 nextResetTime 排序；reset time 缺省时用 observedAt 兜底（展示为 reset due）。
 - 解析逻辑变动必须同步加测试覆盖两种信号（count > 0、percent-only、两者都缺）。
 
 ## 验证

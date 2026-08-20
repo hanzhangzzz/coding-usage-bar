@@ -8,7 +8,8 @@ interface GlmLimit {
   unit?: number;
   number?: number;
   percentage: number;
-  nextResetTime: number;
+  // Omitted for a fresh window with zero usage.
+  nextResetTime?: number;
 }
 
 interface GlmQuotaResponse {
@@ -39,6 +40,38 @@ export async function fetchGlmQuota(config: GlmConfig): Promise<GlmQuotaResponse
   return (await response.json()) as GlmQuotaResponse;
 }
 
+function resetTimeIso(value: number | undefined): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+// GLM identifies windows by shape: unit 3 + number 5 is the 5-hour window,
+// unit 6 + number 1 is the weekly window. Matching on shape (with a
+// reset-time sort as fallback) matters because sorting alone breaks when a
+// window omits nextResetTime — which GLM does for a fresh window with zero
+// usage (same proto-style field omission as Kimi's zero `used`). The zero
+// percentage is a real signal and must not be dropped; a missing reset time
+// falls back to `observedAt`, which renders as "reset due".
+function pickTokenWindows(limits: GlmLimit[]): { five: GlmLimit; seven: GlmLimit } | null {
+  const tokenLimits = limits.filter((limit) => limit.type === "TOKENS_LIMIT");
+  if (tokenLimits.length < 2) {
+    return null;
+  }
+  let five = tokenLimits.find((limit) => limit.unit === 3 && limit.number === 5) ?? null;
+  let seven = tokenLimits.find((limit) => limit.unit === 6 && limit.number === 1) ?? null;
+  if (!five || !seven) {
+    const rest = tokenLimits
+      .filter((limit) => limit !== five && limit !== seven)
+      .sort((a, b) => (a.nextResetTime ?? 0) - (b.nextResetTime ?? 0));
+    five = five ?? rest.shift() ?? null;
+    seven = seven ?? rest.shift() ?? null;
+  }
+  return five && seven ? { five, seven } : null;
+}
+
 export function usageFromGlmQuota(
   quota: GlmQuotaResponse,
   options: { observedAt?: string; source: string },
@@ -47,29 +80,23 @@ export function usageFromGlmQuota(
     return null;
   }
 
-  const tokenLimits = quota.data.limits.filter(
-    (limit) => limit.type === "TOKENS_LIMIT",
-  );
-
-  if (tokenLimits.length < 2) {
+  const picked = pickTokenWindows(quota.data.limits);
+  if (!picked) {
     return null;
   }
 
-  const sortedByReset = [...tokenLimits].sort(
-    (a, b) => a.nextResetTime - b.nextResetTime,
-  );
-
-  const fiveHourRaw = sortedByReset[0];
-  const sevenDayRaw = sortedByReset[1];
+  // new Date(undefined).toISOString() throws RangeError("Invalid time value"),
+  // which used to fail the whole live collection; never convert unchecked.
+  const fallbackIso = options.observedAt ?? new Date().toISOString();
 
   const fiveHour = normalizeWindow("five_hour", {
-    used_percent: fiveHourRaw.percentage,
-    resets_at: new Date(fiveHourRaw.nextResetTime).toISOString(),
+    used_percent: picked.five.percentage,
+    resets_at: resetTimeIso(picked.five.nextResetTime) ?? fallbackIso,
   }, 300);
 
   const sevenDay = normalizeWindow("seven_day", {
-    used_percent: sevenDayRaw.percentage,
-    resets_at: new Date(sevenDayRaw.nextResetTime).toISOString(),
+    used_percent: picked.seven.percentage,
+    resets_at: resetTimeIso(picked.seven.nextResetTime) ?? fallbackIso,
   }, 10080);
 
   if (!fiveHour || !sevenDay) {

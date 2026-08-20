@@ -582,6 +582,22 @@ function cardUpdatedLabel(snapshot: StatusSnapshot) {
   return `${generated.getMonth() + 1}/${generated.getDate()} ${clock}`;
 }
 
+// Per-provider observation timestamp shown next to the advice line. This
+// replaces the old stale-usage WARNING text rows: a visible "updated ..."
+// that lags tells the same story without stretching the menu wider than the
+// card (SwiftBar sizes the menu to its widest row).
+function observedUpdatedLabel(item: StatusSnapshot["providers"][number], now: Date) {
+  const observed = new Date(item.meta.observedAt);
+  if (Number.isNaN(observed.getTime())) {
+    return null;
+  }
+  const clock = `${String(observed.getHours()).padStart(2, "0")}:${String(observed.getMinutes()).padStart(2, "0")}`;
+  const sameDay = observed.getFullYear() === now.getFullYear()
+    && observed.getMonth() === now.getMonth()
+    && observed.getDate() === now.getDate();
+  return `updated ${sameDay ? clock : `${observed.getMonth() + 1}/${observed.getDate()} ${clock}`}`;
+}
+
 function cardProviderBlock(item: StatusSnapshot["providers"][number], now: Date): CardProviderBlock {
   const providerId = item.usage.provider;
   const balanceOnly = Boolean(item.usage.balance && item.usage.windows.length === 0);
@@ -608,6 +624,7 @@ function cardProviderBlock(item: StatusSnapshot["providers"][number], now: Date)
       rows: [],
       note: "Pay-as-you-go · no windowed quota",
       message: null,
+      updated: observedUpdatedLabel(item, now),
     };
   }
 
@@ -632,6 +649,7 @@ function cardProviderBlock(item: StatusSnapshot["providers"][number], now: Date)
     rows,
     note: null,
     message: shortCardMessage(item),
+    updated: observedUpdatedLabel(item, now),
   };
 }
 
@@ -792,7 +810,15 @@ export function renderMenuBar(snapshot: StatusSnapshot = loadDisplayStatusSnapsh
     }
   }
 
-  for (const issue of snapshot.issues) {
+  // Card mode folds staleness into the per-provider "updated ..." labels, so
+  // warning-severity issue rows (stale usage, cache fallback) are dropped
+  // there; error-severity rows (setup problems the card cannot express) stay.
+  // Long issue messages are length-capped so they can never stretch the menu
+  // wider than the card image.
+  const visibleIssues = card
+    ? snapshot.issues.filter((issue) => issue.severity === "error")
+    : snapshot.issues;
+  for (const issue of visibleIssues) {
     const color = issue.severity === "error" ? ALERT_COLOR : WARNING_COLOR;
     lines.push(line(`${issue.severity.toUpperCase()}  ${issueLabel(issue.code)}`, {
       color,
@@ -800,10 +826,10 @@ export function renderMenuBar(snapshot: StatusSnapshot = loadDisplayStatusSnapsh
       sfimage: "exclamationmark.triangle.fill",
       sfcolor: color,
     }));
-    lines.push(muted(issue.message));
+    lines.push(line(issue.message, { color: MUTED_COLOR, size: 12, length: 84 }));
   }
 
-  if (snapshot.issues.length > 0) {
+  if (visibleIssues.length > 0) {
     lines.push("---");
   }
   lines.push(line(compact ? "Expand" : "Collapse", toggleParams));

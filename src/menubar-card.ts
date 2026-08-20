@@ -25,6 +25,7 @@ export interface CardProviderBlock {
   rows: CardBarRow[];
   note: string | null;
   message: string | null;
+  updated: string | null;
 }
 
 export interface UsageCardPayload {
@@ -205,12 +206,23 @@ function drawProviderBlock(ctx: DrawContext, block: CardProviderBlock, topPt: nu
 
   if (block.note) {
     drawText(ctx, "r24", block.note, PAD_X, y + 14, variant.muted);
+    if (block.updated) {
+      const updatedW = textWidthPt(ctx, "r22", block.updated);
+      drawText(ctx, "r22", block.updated, RIGHT_EDGE - updatedW, y + 14, variant.msg);
+    }
     y += ROW_H;
   }
 
   if (block.message) {
-    const fitted = ellipsize(style(ctx, "r22"), block.message, (W - PAD_X * 2) * ctx.scale);
-    drawText(ctx, "r22", fitted, PAD_X, y + MSG_GAP + 11, variant.msg);
+    const baseline = y + MSG_GAP + 11;
+    let messageMaxPt = W - PAD_X * 2;
+    if (block.updated) {
+      const updatedW = textWidthPt(ctx, "r22", block.updated);
+      drawText(ctx, "r22", block.updated, RIGHT_EDGE - updatedW, baseline, variant.msg);
+      messageMaxPt -= updatedW + 12;
+    }
+    const fitted = ellipsize(style(ctx, "r22"), block.message, messageMaxPt * ctx.scale);
+    drawText(ctx, "r22", fitted, PAD_X, baseline, variant.msg);
   }
 }
 

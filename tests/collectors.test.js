@@ -7,6 +7,7 @@ import { usageFromClaudeStatusLine } from "../dist/claude.js";
 import { collectCodexUsage } from "../dist/codex.js";
 import { collectKimiUsage, probeKimiAccessFrozen, readClaudeLanesKimiConfig, resolveKimiConfig, usageFromKimiUsages } from "../dist/kimi.js";
 import { usageFromMinimaxQuota } from "../dist/minimax.js";
+import { usageFromGlmQuota } from "../dist/glm.js";
 
 test("usageFromClaudeStatusLine normalizes status line rate limits", () => {
   const usage = usageFromClaudeStatusLine({
@@ -567,4 +568,64 @@ test("collectKimiUsage stays unblocked when the probe reports a healthy account"
     assert.equal(usage.blocked, undefined);
     assert.equal(usage.windows.find((w) => w.name === "five_hour").usedPercent, 25);
   });
+});
+
+test("usageFromGlmQuota keeps a fresh zero-usage window whose nextResetTime is omitted", () => {
+  // Regression: GLM omits nextResetTime for a fresh window with zero usage
+  // (observed live 2026-08-20). The old code hit
+  // new Date(undefined).toISOString() -> RangeError("Invalid time value"),
+  // failing the whole live collection and forcing the cache fallback. The
+  // zero percentage is a real signal: keep the window, fall back to
+  // observedAt for the reset time (renders as "reset due").
+  const usage = usageFromGlmQuota({
+    success: true,
+    data: {
+      level: "max",
+      limits: [
+        { type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 0 },
+        { type: "TOKENS_LIMIT", unit: 6, number: 1, percentage: 9, nextResetTime: Date.parse("2026-08-25T21:37:35.998Z") },
+        { type: "TIME_LIMIT", unit: 5, number: 1, percentage: 1, nextResetTime: Date.parse("2026-08-30T21:37:35.998Z") },
+      ],
+    },
+  }, { source: "test", observedAt: "2026-08-20T08:00:00.000Z" });
+  assert.ok(usage, "zero-usage window must not fail the collection");
+  assert.equal(usage.windows[0].name, "five_hour");
+  assert.equal(usage.windows[0].usedPercent, 0);
+  assert.equal(usage.windows[0].resetsAt, "2026-08-20T08:00:00.000Z");
+  assert.equal(usage.windows[1].name, "seven_day");
+  assert.equal(usage.windows[1].usedPercent, 9);
+  assert.equal(usage.windows[1].resetsAt, "2026-08-25T21:37:35.998Z");
+});
+
+test("usageFromGlmQuota identifies windows by unit/number shape, not reset order", () => {
+  // The weekly entry deliberately resets EARLIER than the five-hour entry:
+  // a pure reset-time sort would swap them.
+  const usage = usageFromGlmQuota({
+    success: true,
+    data: {
+      level: "max",
+      limits: [
+        { type: "TOKENS_LIMIT", unit: 6, number: 1, percentage: 9, nextResetTime: Date.parse("2026-08-20T10:00:00Z") },
+        { type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 42, nextResetTime: Date.parse("2026-08-21T10:00:00Z") },
+      ],
+    },
+  }, { source: "test" });
+  assert.ok(usage);
+  assert.equal(usage.windows[0].name, "five_hour");
+  assert.equal(usage.windows[0].usedPercent, 42);
+  assert.equal(usage.windows[1].usedPercent, 9);
+});
+
+test("usageFromGlmQuota still returns null when token windows are missing", () => {
+  const usage = usageFromGlmQuota({
+    success: true,
+    data: {
+      level: "max",
+      limits: [
+        { type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 0 },
+        { type: "TIME_LIMIT", unit: 5, number: 1, percentage: 1, nextResetTime: Date.parse("2026-08-30T21:37:35.998Z") },
+      ],
+    },
+  }, { source: "test" });
+  assert.equal(usage, null);
 });

@@ -361,6 +361,18 @@ test("renderMenuBar renders the dropdown as a single card image when glyph atlas
     // Provider text rows collapse into the card; interactive rows stay text.
     assert.doesNotMatch(output, /Codex {2}Low \|/);
     assert.match(output, /Refresh now \| refresh=true/);
+    // Staleness lives in the card's per-provider "updated" labels now; the
+    // wide warning text rows would stretch the menu past the card width.
+    assert.doesNotMatch(output, /WARNING/);
+    const withError = renderMenuBar({
+      ...snapshot,
+      issues: [
+        ...snapshot.issues,
+        { provider: "glm", severity: "error", code: "GLM_API_KEY_MISSING", message: "GLM API key missing" },
+      ],
+    }, paths, new Date("2026-05-08T01:00:00.000Z"));
+    assert.match(withError, /ERROR {2}GLM API key not set/);
+    assert.doesNotMatch(withError, /WARNING/);
     const second = renderMenuBar(snapshot, paths, new Date("2026-05-08T01:01:30.000Z"));
     assert.equal(output, second, "card output must stay byte-identical while the snapshot is unchanged");
   } finally {
