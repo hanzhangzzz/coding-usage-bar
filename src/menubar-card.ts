@@ -35,9 +35,11 @@ export interface UsageCardPayload {
   scale: number;
 }
 
+// No background fill: the content floats directly on the NSMenu vibrancy
+// material, exactly like native menu items. Any opaque card panel reads as a
+// "picture in a frame" because NSMenu's fixed item insets keep the image from
+// ever reaching the menu edge.
 interface CardVariant {
-  bg: Rgb;
-  bgAlpha: number;
   text: Rgb;
   muted: Rgb;
   msg: Rgb;
@@ -48,33 +50,31 @@ interface CardVariant {
 }
 
 const LIGHT: CardVariant = {
-  bg: parseHex("F5F5F7"),
-  bgAlpha: 0.88,
   text: parseHex("111827"),
   muted: parseHex("6B7280"),
   msg: parseHex("8E8E93"),
   track: parseHex("000000"),
-  trackAlpha: 0.08,
+  trackAlpha: 0.10,
   sep: parseHex("000000"),
-  sepAlpha: 0.07,
+  sepAlpha: 0.08,
 };
 
 const DARK: CardVariant = {
-  bg: parseHex("232326"),
-  bgAlpha: 0.88,
   text: parseHex("F9FAFB"),
   muted: parseHex("A1A1AA"),
   msg: parseHex("7C7C82"),
   track: parseHex("FFFFFF"),
-  trackAlpha: 0.10,
+  trackAlpha: 0.12,
   sep: parseHex("FFFFFF"),
-  sepAlpha: 0.08,
+  sepAlpha: 0.09,
 };
 
-// Layout in points (multiplied by payload.scale when drawing).
+// Layout in points (multiplied by payload.scale when drawing). PAD_X is tiny
+// because the menu item's own content inset already provides the left/right
+// margin; the image's content edge then lines up with native item text.
 const W = 460;
-const PAD_X = 16;
-const TOP_PAD = 14;
+const PAD_X = 2;
+const TOP_PAD = 8;
 const HEADER_H = 18;
 const HEADER_GAP = 12;
 const BLOCK_PAD_Y = 10;
@@ -82,7 +82,7 @@ const HEAD_H = 24;
 const ROW_H = 21;
 const MSG_GAP = 6;
 const MSG_H = 14;
-const BOTTOM_PAD = 8;
+const BOTTOM_PAD = 4;
 const RIGHT_EDGE = W - PAD_X;
 const RESET_COL_W = 104;
 const PCT_COL_W = 36;
@@ -232,8 +232,6 @@ function drawCard(payload: UsageCardPayload, glyphs: GlyphSet, mode: "light" | "
   const s = payload.scale || 2;
   const canvas = new Canvas(Math.round(W * s), Math.round(heightPt * s));
   const ctx: DrawContext = { canvas, glyphs, scale: s, heightPt };
-
-  fillRect(ctx, 0, 0, W, heightPt, 14, variant.bg, variant.bgAlpha);
 
   const titleEnd = drawText(ctx, "b26", "Coding Usage Bar", PAD_X, TOP_PAD + 14, variant.text);
   drawPill(ctx, titleEnd + 8, TOP_PAD + 1, payload.profile, variant.muted);
