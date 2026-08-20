@@ -96,6 +96,7 @@ export interface RuntimePaths {
   launchAgentFile: string;
   claudeSettingsFile: string;
   claudeStatusLineScript: string;
+  glyphsDir: string;
 }
 
 export interface ProviderStatus {

@@ -7,7 +7,9 @@ import { formatProviderLabel, formatResetTime } from "./format.js";
 import { buildPaths } from "./paths.js";
 import { stableNodeExecutable } from "./node-runtime.js";
 import { loadDisplayStatusSnapshot } from "./runtime.js";
-import { renderTitleImage, renderDropdownBars } from "./menubar-render.js";
+import { renderTitleImage } from "./menubar-render.js";
+import { loadGlyphSet, GlyphSet } from "./glyphs.js";
+import { renderUsageCard, UsageCardPayload, CardProviderBlock } from "./menubar-card.js";
 import { BurnState, RuntimePaths, StatusSnapshot } from "./types.js";
 
 const MARKER = "coding-usage-bar managed SwiftBar plugin";
@@ -79,34 +81,23 @@ const TITLE_IMAGE_SCALE = 2;
 const titleImageCache = new Map<string, { image: string; width: number; height: number } | null>();
 
 
-const dropdownBarCache = new Map<string, { images: string[]; width: number; height: number } | null>();
+// The dropdown card is the ONLY image in the dropdown. Never go back to
+// per-row images: SwiftBar rebuilds the whole menu on any output change, and
+// its cost scales with the number of image-bearing menu items (17 images =
+// 6-8s WindowServer storm per data refresh; title + one card = <2s blip).
+const usageCardCache = new Map<string, { image: string; width: number; height: number } | null>();
+let cachedGlyphSet: GlyphSet | null | undefined;
 
-function renderDropdownBarImages(bars: Array<{ pct: number; lightColor: string; darkColor: string }>) {
-  if (bars.length === 0) {
-    return [];
+function glyphSetFor(paths: RuntimePaths): GlyphSet | null {
+  if (cachedGlyphSet === undefined) {
+    cachedGlyphSet = loadGlyphSet(paths);
   }
-  const payload = {
-    bars,
-    scale: TITLE_IMAGE_SCALE,
-    barWidth: 80,
-    barHeight: 10,
-    barRadius: 3,
-    light: { barBgColor: "000000", barBgAlpha: 0.15 },
-    dark: { barBgColor: "FFFFFF", barBgAlpha: 0.2 },
-  };
-  const cacheKey = JSON.stringify(payload);
-  if (dropdownBarCache.has(cacheKey)) {
-    const cached = dropdownBarCache.get(cacheKey);
-    return cached ? cached.images.map((img) => ({ image: img, width: cached.width, height: cached.height })) : [];
-  }
-  try {
-    const result = renderDropdownBars(payload);
-    dropdownBarCache.set(cacheKey, result);
-    return result.images.map((img) => ({ image: img, width: result.width, height: result.height }));
-  } catch {
-    dropdownBarCache.set(cacheKey, null);
-    return [];
-  }
+  return cachedGlyphSet;
+}
+
+// Test seam: forces the next glyphSetFor() call to re-read from disk.
+export function resetGlyphSetCache() {
+  cachedGlyphSet = undefined;
 }
 
 function appCliPath(paths: RuntimePaths) {
@@ -498,18 +489,8 @@ function coloredMeter(usedPercent: number, fillColor: string, width = METER_WIDT
     + (empty > 0 ? ansiRGB(MUTED_COLOR, "░".repeat(empty)) : "");
 }
 
-function usageLine(label: "5h" | "7d", usedPercent: number, resetsAt: string, color: string, now: Date, barImage?: { image: string; width: number; height: number }) {
+function usageLine(label: "5h" | "7d", usedPercent: number, resetsAt: string, color: string, now: Date) {
   const percent = `${Math.round(usedPercent).toString().padStart(3)}%`;
-  if (barImage) {
-    return line(`${label}  ${percent}  reset ${formatResetTime(resetsAt, now)}`, {
-      image: barImage.image,
-      width: barImage.width,
-      height: barImage.height,
-      color,
-      font: ROW_FONT,
-      size: 12,
-    });
-  }
   const bar = coloredMeter(usedPercent, color);
   return line(`${label}  ${bar}  ${ansiRGB(color, percent)}  reset ${formatResetTime(resetsAt, now)}`, {
     ansi: true,
@@ -526,11 +507,10 @@ function providerBadge(provider: StatusSnapshot["providers"][number]) {
   return `${Math.round(fiveHour.usedPercent)}%`;
 }
 
+// Text-fallback rows must stay image-free (see the dropdown card comment), so
+// provider rows always use SF Symbols here; PNG marks appear only inside the
+// title image and the composite card.
 function providerIconParams(provider: string) {
-  const image = imageAssetBase64(PROVIDER_ICON_ASSET[provider] ?? "");
-  if (image) {
-    return { image };
-  }
   return { sfimage: PROVIDER_ICON_FALLBACK[provider] ?? "terminal.fill" };
 }
 
@@ -569,6 +549,123 @@ function issueLabel(code: string) {
     return "Status not ready";
   }
   return code.replaceAll("_", " ").toLowerCase();
+}
+
+// Compact one-liners for the card: the state pill already carries the
+// verdict, so the message only keeps the numbers that inform the next action.
+function shortCardMessage(provider: StatusSnapshot["providers"][number]) {
+  if (provider.usage.blocked) {
+    return "Monthly quota exhausted — frozen until the next billing cycle.";
+  }
+  const target = provider.analysis.target;
+  const range = target ? `${target.minPercent.toFixed(1)}%-${target.maxPercent.toFixed(1)}%` : null;
+  switch (provider.analysis.state) {
+    case "LIMIT_RISK":
+      return "Near plan limit — switch provider or slow down.";
+    case "OVER_BURN":
+      return range ? `Burning fast (target ${range}).` : "Burning fast — consider slowing down.";
+    case "UNDER_BURN":
+      return range ? `Below target (${range}).` : "Below burn target.";
+    case "ON_TRACK":
+      return range ? `On pace (target ${range}).` : "On pace.";
+    default:
+      return "Learning burn pattern — advice once samples suffice.";
+  }
+}
+
+function cardUpdatedLabel(snapshot: StatusSnapshot) {
+  const generated = new Date(snapshot.generatedAt);
+  if (Number.isNaN(generated.getTime())) {
+    return "";
+  }
+  const clock = `${String(generated.getHours()).padStart(2, "0")}:${String(generated.getMinutes()).padStart(2, "0")}`;
+  return `${generated.getMonth() + 1}/${generated.getDate()} ${clock}`;
+}
+
+function cardProviderBlock(item: StatusSnapshot["providers"][number], now: Date): CardProviderBlock {
+  const providerId = item.usage.provider;
+  const balanceOnly = Boolean(item.usage.balance && item.usage.windows.length === 0);
+  const blocked = Boolean(item.usage.blocked);
+  const colorPair = blocked
+    ? MUTED_COLOR
+    : balanceOnly
+    ? (item.usage.balance?.isAvailable ? OK_COLOR : ALERT_COLOR)
+    : STATE_COLOR[item.analysis.state];
+  const [lightColor, darkColor] = colorPair.split(",");
+  const darkAsset = PROVIDER_ICON_DARK_ASSET[providerId];
+  const darkPath = darkAsset ? path.join(ASSET_DIR, darkAsset) : null;
+
+  if (balanceOnly && item.usage.balance) {
+    const currency = item.usage.balance.currency === "CNY" ? "¥" : "$";
+    return {
+      name: formatProviderLabel(providerId),
+      iconPath: providerIconPath(providerId),
+      iconPathDark: darkPath && fs.existsSync(darkPath) ? darkPath : null,
+      stateLabel: item.usage.balance.isAvailable ? "Balance" : "Depleted",
+      lightColor,
+      darkColor,
+      headline: `${currency}${item.usage.balance.total}`,
+      rows: [],
+      note: "Pay-as-you-go · no windowed quota",
+      message: null,
+    };
+  }
+
+  const five = windowByName(item, "five_hour");
+  const seven = windowByName(item, "seven_day");
+  const rows = [];
+  if (five) {
+    rows.push({ label: "5h", pct: Math.round(five.usedPercent), resetLabel: `reset ${formatResetTime(five.resetsAt, now)}` });
+  }
+  if (seven) {
+    rows.push({ label: "7d", pct: Math.round(seven.usedPercent), resetLabel: `reset ${formatResetTime(seven.resetsAt, now)}` });
+  }
+  const headlinePct = five ?? seven;
+  return {
+    name: formatProviderLabel(providerId),
+    iconPath: providerIconPath(providerId),
+    iconPathDark: darkPath && fs.existsSync(darkPath) ? darkPath : null,
+    stateLabel: blocked ? "Frozen" : STATE_LABEL[item.analysis.state],
+    lightColor,
+    darkColor,
+    headline: headlinePct ? `${Math.round(headlinePct.usedPercent)}%` : STATE_LABEL[item.analysis.state],
+    rows,
+    note: null,
+    message: shortCardMessage(item),
+  };
+}
+
+function usageCardValue(
+  snapshot: StatusSnapshot,
+  providers: StatusSnapshot["providers"],
+  glyphs: GlyphSet,
+  now: Date,
+) {
+  const payload: UsageCardPayload = {
+    profile: snapshot.profile.toUpperCase(),
+    updatedLabel: cardUpdatedLabel(snapshot),
+    providers: providers.map((item) => cardProviderBlock(item, now)),
+    scale: TITLE_IMAGE_SCALE,
+  };
+  const cacheKey = JSON.stringify(payload);
+  if (usageCardCache.has(cacheKey)) {
+    return usageCardCache.get(cacheKey) ?? null;
+  }
+  try {
+    const images = renderUsageCard(payload, glyphs);
+    const value = images.light?.image && images.dark?.image
+      ? {
+        image: `${images.light.image},${images.dark.image}`,
+        width: images.light.width,
+        height: images.light.height,
+      }
+      : null;
+    usageCardCache.set(cacheKey, value);
+    return value;
+  } catch {
+    usageCardCache.set(cacheKey, null);
+    return null;
+  }
 }
 
 // `now` only feeds low-frequency decisions (reset due/day prefix). The output
@@ -625,78 +722,74 @@ export function renderMenuBar(snapshot: StatusSnapshot = loadDisplayStatusSnapsh
         dropdown: false,
       }),
     "---",
-    line("Coding Usage Bar", {
+  ];
+
+  const glyphs = glyphSetFor(paths);
+  const card = glyphs ? usageCardValue(snapshot, providers, glyphs, now) : null;
+
+  if (card) {
+    lines.push(line("", {
+      image: card.image,
+      width: card.width,
+      height: card.height,
+    }));
+    lines.push("---");
+  } else {
+    // Text-only fallback when glyph atlases are missing (never baked or
+    // unreadable): zero dropdown images so the storm cannot come back.
+    lines.push(line("Coding Usage Bar", {
       color: TEXT_COLOR,
       size: 15,
       sfimage: "flame.fill",
       sfcolor: STATE_COLOR[topState],
       badge: snapshot.profile.toUpperCase(),
-    }),
-    muted(anyProviderStale(snapshot) ? "Data stale" : "Data fresh"),
-    "---",
-  ];
+    }));
+    lines.push(muted(anyProviderStale(snapshot) ? "Data stale" : "Data fresh"));
+    lines.push("---");
 
-  const barDataList: Array<{ pct: number; lightColor: string; darkColor: string }> = [];
-  for (const item of providers) {
-    if (item.usage.balance && item.usage.windows.length === 0) {
-      continue;
-    }
-    const [lc, dc] = (item.usage.blocked ? MUTED_COLOR : STATE_COLOR[item.analysis.state]).split(",");
-    const f = windowByName(item, "five_hour");
-    const s = windowByName(item, "seven_day");
-    if (f) {
-      barDataList.push({ pct: Math.round(f.usedPercent), lightColor: lc, darkColor: dc });
-    }
-    if (s) {
-      barDataList.push({ pct: Math.round(s.usedPercent), lightColor: lc, darkColor: dc });
-    }
-  }
-  const dropdownBars = renderDropdownBarImages(barDataList);
-  let barIdx = 0;
+    for (const item of providers) {
+      const five = windowByName(item, "five_hour");
+      const seven = windowByName(item, "seven_day");
 
-  for (const item of providers) {
-    const color = STATE_COLOR[item.analysis.state];
-    const five = windowByName(item, "five_hour");
-    const seven = windowByName(item, "seven_day");
+      if (item.usage.balance && item.usage.windows.length === 0) {
+        const currency = item.usage.balance.currency === "CNY" ? "¥" : "$";
+        const balanceText = `${currency}${item.usage.balance.total}`;
+        const availableLabel = item.usage.balance.isAvailable ? "Available" : "Depleted";
+        lines.push(line(`${formatProviderLabel(item.usage.provider)}  ${availableLabel}`, {
+          ...providerIconParams(item.usage.provider),
+          color: TEXT_COLOR,
+          size: 14,
+          badge: balanceText,
+        }));
+        lines.push(line(`Balance  ${balanceText}`, {
+          color: TEXT_COLOR,
+          font: ROW_FONT,
+          size: 12,
+        }));
+        lines.push(line(item.analysis.message, { color: MUTED_COLOR, size: 12, length: 84 }));
+        lines.push("---");
+        continue;
+      }
 
-    if (item.usage.balance && item.usage.windows.length === 0) {
-      const currency = item.usage.balance.currency === "CNY" ? "¥" : "$";
-      const balanceText = `${currency}${item.usage.balance.total}`;
-      const availableLabel = item.usage.balance.isAvailable ? "Available" : "Depleted";
-      lines.push(line(`${formatProviderLabel(item.usage.provider)}  ${availableLabel}`, {
+      lines.push(line(`${formatProviderLabel(item.usage.provider)}  ${item.usage.blocked ? "Blocked" : STATE_LABEL[item.analysis.state]}`, {
         ...providerIconParams(item.usage.provider),
         color: TEXT_COLOR,
         size: 14,
-        badge: balanceText,
+        badge: item.usage.blocked ? "Frozen" : providerBadge(item),
       }));
-      lines.push(line(`Balance  ${balanceText}`, {
-        color: TEXT_COLOR,
-        font: ROW_FONT,
-        size: 12,
-      }));
+      if (five) {
+        lines.push(usageLine("5h", five.usedPercent, five.resetsAt, TEXT_COLOR, now));
+      }
+      if (seven) {
+        lines.push(usageLine("7d", seven.usedPercent, seven.resetsAt, TEXT_COLOR, now));
+      }
+      if (item.usage.blocked) {
+        lines.push(muted(`Blocked  ${item.usage.blocked.reason}. 5h/7d numbers above still reflect the window quotas.`));
+      }
+      lines.push(muted(targetLabel(item)));
       lines.push(line(item.analysis.message, { color: MUTED_COLOR, size: 12, length: 84 }));
       lines.push("---");
-      continue;
     }
-
-    lines.push(line(`${formatProviderLabel(item.usage.provider)}  ${item.usage.blocked ? "Blocked" : STATE_LABEL[item.analysis.state]}`, {
-      ...providerIconParams(item.usage.provider),
-      color: TEXT_COLOR,
-      size: 14,
-      badge: item.usage.blocked ? "Frozen" : providerBadge(item),
-    }));
-    if (five) {
-      lines.push(usageLine("5h", five.usedPercent, five.resetsAt, TEXT_COLOR, now, dropdownBars[barIdx++]));
-    }
-    if (seven) {
-      lines.push(usageLine("7d", seven.usedPercent, seven.resetsAt, TEXT_COLOR, now, dropdownBars[barIdx++]));
-    }
-    if (item.usage.blocked) {
-      lines.push(muted(`Blocked  ${item.usage.blocked.reason}. 5h/7d numbers above still reflect the window quotas.`));
-    }
-    lines.push(muted(targetLabel(item)));
-    lines.push(line(item.analysis.message, { color: MUTED_COLOR, size: 12, length: 84 }));
-    lines.push("---");
   }
 
   for (const issue of snapshot.issues) {

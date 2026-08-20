@@ -8,6 +8,7 @@ import { runDaemonOnce } from "./daemon.js";
 import { doctorHasFailures, formatDoctor, runDoctor } from "./doctor.js";
 import { installMenuBar, renderMenuBar, uninstallMenuBar, toggleCompactMode } from "./menubar.js";
 import { buildPaths } from "./paths.js";
+import { bakeGlyphAtlases } from "./glyphs.js";
 import { maybePromptForStar } from "./star.js";
 
 function hasFlag(args: string[], flag: string) {
@@ -26,6 +27,7 @@ Usage:
   coding-usage-bar menubar install [--dry-run]
   coding-usage-bar menubar uninstall [--dry-run]
   coding-usage-bar menubar toggle-compact
+  coding-usage-bar menubar bake-glyphs [--dry-run]
   coding-usage-bar ingest claude-statusline
   coding-usage-bar daemon [--once] [--dry-run]
 `);
@@ -118,6 +120,11 @@ async function main() {
     if (command === "menubar" && subcommand === "toggle-compact") {
       const isCompact = toggleCompactMode();
       console.log(isCompact ? "Compact" : "Expanded");
+      return;
+    }
+
+    if (command === "menubar" && subcommand === "bake-glyphs") {
+      console.log(bakeGlyphAtlases(buildPaths(), { dryRun }).join("\n"));
       return;
     }
 

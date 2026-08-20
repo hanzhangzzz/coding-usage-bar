@@ -3,8 +3,45 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { renderMenuBar, swiftBarStatusItemVisibilityKeys, readCompactMode, toggleCompactMode } from "../dist/menubar.js";
+import { renderMenuBar, swiftBarStatusItemVisibilityKeys, readCompactMode, toggleCompactMode, resetGlyphSetCache } from "../dist/menubar.js";
 import { buildPaths } from "../dist/paths.js";
+import { encodePNG } from "../dist/png.js";
+import { GLYPH_STYLES } from "../dist/glyphs.js";
+
+function freshPaths() {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-menubar-"));
+  return buildPaths(home);
+}
+
+// Minimal glyph fixture: every style resolves every character to the same
+// white cell via the "?" fallback, which is enough for structural assertions
+// (card emitted, byte-stable) without running the osascript bake.
+function writeFixtureGlyphs(paths) {
+  fs.mkdirSync(paths.glyphsDir, { recursive: true });
+  const cellH = 8;
+  const rgba = new Uint8Array(8 * cellH * 4);
+  for (let i = 0; i < 8 * cellH; i++) {
+    rgba[i * 4] = 255;
+    rgba[i * 4 + 1] = 255;
+    rgba[i * 4 + 2] = 255;
+    rgba[i * 4 + 3] = 200;
+  }
+  const png = encodePNG(rgba, 8, cellH);
+  const styles = {};
+  for (const style of GLYPH_STYLES) {
+    fs.writeFileSync(path.join(paths.glyphsDir, `${style.key}.png`), png);
+    styles[style.key] = {
+      px: style.px,
+      weight: style.weight,
+      ascent: 5,
+      descent: 1,
+      pad: 2,
+      cellH,
+      glyphs: { "?": { x: 0, w: 8, adv: 4 } },
+    };
+  }
+  fs.writeFileSync(path.join(paths.glyphsDir, "metrics.json"), JSON.stringify({ version: 1, styles }));
+}
 
 const codexProvider = {
   usage: {
@@ -108,13 +145,13 @@ function pngInfoFromBase64(value) {
 }
 
 test("renderMenuBar outputs SwiftBar-compatible status text", () => {
-  const output = renderMenuBar(snapshot);
+  const output = renderMenuBar(snapshot, freshPaths());
 
   assert.match(output, /^ \| image=[A-Za-z0-9+/=]+,[A-Za-z0-9+/=]+ width=\d+ height=22 dropdown=false tooltip=5H:0%,7D:35%\\ │\\ 5H:31%,7D:69%/);
   assert.match(output, /\n---\n/);
   assert.match(output, /Coding Usage Bar \| color=#111827,#F9FAFB size=15 sfimage=flame\.fill/);
-  assert.match(output, /Codex  Low \| image=[A-Za-z0-9+/=]+ color=#111827,#F9FAFB size=14/);
-  assert.match(output, /Claude  Fast \| image=[A-Za-z0-9+/=]+ color=#111827,#F9FAFB size=14/);
+  assert.match(output, /Codex  Low \| sfimage=[a-z.]+ color=#111827,#F9FAFB size=14/);
+  assert.match(output, /Claude  Fast \| sfimage=[a-z.]+ color=#111827,#F9FAFB size=14/);
   assert.match(output, /5h[^\n]*0%[^\n]*reset/);
   assert.match(output, /7d[^\n]*35%[^\n]*reset/);
   assert.match(output, /WARNING  Claude not connected \| color=#FF9F0A,#FFD60A size=13 sfimage=exclamationmark\.triangle\.fill/);
@@ -123,7 +160,7 @@ test("renderMenuBar outputs SwiftBar-compatible status text", () => {
 });
 
 test("renderMenuBar title keeps provider icons scoped to their usage segments", () => {
-  const output = renderMenuBar(snapshot);
+  const output = renderMenuBar(snapshot, freshPaths());
   const titleLine = output.split("\n")[0];
   const imageParam = titleLine.match(/image=([^ ]+)/)?.[1];
   assert.ok(imageParam, "title line should include a composite image");
@@ -173,10 +210,10 @@ test("renderMenuBar shows current Codex 7d usage without a synthetic 5h row", ()
     issues: [],
   };
 
-  const output = renderMenuBar(weeklyOnly);
+  const output = renderMenuBar(weeklyOnly, freshPaths());
   assert.match(output, /tooltip=7D:52%/);
   assert.match(output, /Codex  Learning/);
-  assert.match(output, /7d\s+52%\s+reset/);
+  assert.match(output, /7d[^\n]*52%[^\n]*reset/);
   assert.doesNotMatch(output, /\n5h\s/);
   assert.match(output, /Codex 5h usage unavailable; showing 7d only\./);
 });
@@ -237,7 +274,7 @@ test("toggleCompactMode creates and removes compact mode file", () => {
 });
 
 test("renderMenuBar shows Collapse toggle in full mode", () => {
-  const output = renderMenuBar(snapshot);
+  const output = renderMenuBar(snapshot, freshPaths());
   assert.match(output, /Collapse \| bash=.* param1=.* param2=menubar param3=toggle-compact terminal=false refresh=true/);
   assert.doesNotMatch(output, /Expand \| bash=.* param1=.* param2=menubar param3=toggle-compact/);
 });
@@ -294,17 +331,52 @@ test("renderMenuBar shows Blocked for a frozen kimi account and keeps window num
   const output = renderMenuBar({
     ...snapshot,
     providers: [...snapshot.providers, blockedKimiProvider],
-  });
+  }, freshPaths());
   assert.match(output, /Kimi  Blocked/);
   assert.match(output, /badge=Frozen/);
   assert.match(output, /Blocked  monthly quota exhausted; access frozen until the next billing cycle/);
   // Window rows must stay untouched: same numbers, same reset labels.
-  assert.match(output, /5h {2} 25%/);
-  assert.match(output, /7d {2} {2}5%/);
+  assert.match(output, /5h[^\n]* 25%/);
+  assert.match(output, /7d[^\n]* {2}5%/);
 });
 
 test("renderMenuBar keeps the burn-state label for unblocked providers", () => {
-  const output = renderMenuBar(snapshot);
+  const output = renderMenuBar(snapshot, freshPaths());
   assert.doesNotMatch(output, /badge=Frozen/);
   assert.doesNotMatch(output, /monthly quota exhausted/);
+});
+
+// Regression guard for the WindowServer repaint storm: SwiftBar's menu
+// rebuild cost scales with the number of image-bearing menu items, so the
+// dropdown must never carry more than the single composite card image.
+test("renderMenuBar renders the dropdown as a single card image when glyph atlases exist", () => {
+  const paths = freshPaths();
+  writeFixtureGlyphs(paths);
+  resetGlyphSetCache();
+  try {
+    const output = renderMenuBar(snapshot, paths, new Date("2026-05-08T01:00:00.000Z"));
+    const dropdownImageLines = output.split("\n").slice(1).filter((entry) => / image=/.test(entry));
+    assert.equal(dropdownImageLines.length, 1, "dropdown must contain exactly one card image item");
+    assert.match(dropdownImageLines[0], /^ \| image=[A-Za-z0-9+/=]+,[A-Za-z0-9+/=]+ width=460 height=\d+/);
+    // Provider text rows collapse into the card; interactive rows stay text.
+    assert.doesNotMatch(output, /Codex {2}Low \|/);
+    assert.match(output, /Refresh now \| refresh=true/);
+    const second = renderMenuBar(snapshot, paths, new Date("2026-05-08T01:01:30.000Z"));
+    assert.equal(output, second, "card output must stay byte-identical while the snapshot is unchanged");
+  } finally {
+    resetGlyphSetCache();
+  }
+});
+
+test("renderMenuBar dropdown stays image-free without glyph atlases", () => {
+  const paths = freshPaths();
+  resetGlyphSetCache();
+  try {
+    const output = renderMenuBar(snapshot, paths);
+    const dropdownImageLines = output.split("\n").slice(1).filter((entry) => / image=/.test(entry));
+    assert.equal(dropdownImageLines.length, 0, "text fallback must not emit any dropdown images");
+    assert.match(output, /Codex {2}Low \| sfimage=/);
+  } finally {
+    resetGlyphSetCache();
+  }
 });

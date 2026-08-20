@@ -11,13 +11,13 @@ import { encodePNG, decodePNG, DecodedPNG } from "./png.js";
 
 const SUPERSAMPLE = 4; // 4x4 coverage sampling for anti-aliased rounded corners
 
-interface Rgb {
+export interface Rgb {
   r: number;
   g: number;
   b: number;
 }
 
-function parseHex(hex: string): Rgb {
+export function parseHex(hex: string): Rgb {
   const v = hex.replace("#", "");
   return {
     r: parseInt(v.slice(0, 2), 16) / 255,
@@ -26,7 +26,7 @@ function parseHex(hex: string): Rgb {
   };
 }
 
-class Canvas {
+export class Canvas {
   readonly width: number;
   readonly height: number;
   private readonly data: Float32Array; // straight-alpha RGBA, 0..1
@@ -72,24 +72,59 @@ class Canvas {
     const pxMax = Math.min(this.width, Math.ceil(ax + aw));
     const pyMin = Math.max(0, Math.floor(H - (ay + ah)));
     const pyMax = Math.min(H, Math.ceil(H - ay));
+    const sdf = (sx: number, sy: number) => {
+      const qx = Math.abs(sx - cx) - halfW;
+      const qy = Math.abs(sy - cy) - halfH;
+      const dxo = Math.max(qx, 0);
+      const dyo = Math.max(qy, 0);
+      return Math.sqrt(dxo * dxo + dyo * dyo) + Math.min(Math.max(qx, qy), 0) - r;
+    };
     for (let py = pyMin; py < pyMax; py++) {
       for (let px = pxMin; px < pxMax; px++) {
+        // Fast path keeps large fills (the full card background) cheap:
+        // supersample only within one pixel of the shape edge.
+        const center = sdf(px + 0.5, H - (py + 0.5));
+        if (center <= -0.71) {
+          this.composite(px, py, color, alpha);
+          continue;
+        }
+        if (center >= 0.71) {
+          continue;
+        }
         let hits = 0;
         for (let j = 0; j < SUPERSAMPLE; j++) {
           for (let i = 0; i < SUPERSAMPLE; i++) {
             const sx = px + (i + 0.5) / SUPERSAMPLE;
             const sPngY = py + (j + 0.5) / SUPERSAMPLE;
-            const sy = H - sPngY; // back to AppKit y-up
-            const qx = Math.abs(sx - cx) - halfW;
-            const qy = Math.abs(sy - cy) - halfH;
-            const dxo = Math.max(qx, 0);
-            const dyo = Math.max(qy, 0);
-            const dist = Math.sqrt(dxo * dxo + dyo * dyo) + Math.min(Math.max(qx, qy), 0) - r;
-            if (dist <= 0) hits++;
+            if (sdf(sx, H - sPngY) <= 0) hits++;
           }
         }
         if (hits > 0) {
           this.composite(px, py, color, alpha * (hits / (SUPERSAMPLE * SUPERSAMPLE)));
+        }
+      }
+    }
+  }
+
+  // Blit one glyph cell from a baked atlas 1:1, tinting the (white, alpha
+  // anti-aliased) glyph pixels with `color`. AppKit coords: `ax`/`ay` place
+  // the cell's bottom-left corner.
+  drawGlyphCell(atlas: DecodedPNG, srcX: number, srcW: number, ax: number, ay: number, color: Rgb, alpha: number): void {
+    const H = this.height;
+    const cellH = atlas.height;
+    const x0 = Math.round(ax);
+    const y0 = Math.round(ay);
+    for (let sy = 0; sy < cellH; sy++) {
+      // Atlas rows are top-down; canvas rows are addressed top-down too, but
+      // the destination rect is expressed y-up from `ay`.
+      const py = H - (y0 + cellH) + sy;
+      if (py < 0 || py >= H) continue;
+      for (let sx = 0; sx < srcW; sx++) {
+        const px = x0 + sx;
+        if (px < 0 || px >= this.width) continue;
+        const a = atlas.data[(sy * atlas.width + (srcX + sx)) * 4 + 3] / 255;
+        if (a > 0) {
+          this.composite(px, py, color, a * alpha);
         }
       }
     }
@@ -167,7 +202,7 @@ function bilinear(data: Uint8Array, w: number, h: number, fx: number, fy: number
 
 const iconCache = new Map<string, DecodedPNG | null>();
 
-function loadIcon(iconPath: string): DecodedPNG | null {
+export function loadIcon(iconPath: string): DecodedPNG | null {
   if (iconCache.has(iconPath)) {
     return iconCache.get(iconPath) ?? null;
   }

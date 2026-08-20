@@ -6,6 +6,7 @@ import { claudeStatusLineHasIngest, getClaudeStatusLineCommand, readClaudeSettin
 import { ensureConfig, readConfig } from "./config.js";
 import { ensureDir, isFile, readJsonFile, writeJsonAtomic } from "./fs-util.js";
 import { addSwiftBarToLoginItems, ensureSwiftBarInstalled, installMenuBar, openSwiftBar, uninstallMenuBar } from "./menubar.js";
+import { bakeGlyphAtlases } from "./glyphs.js";
 import { buildPaths } from "./paths.js";
 import { stableNodeExecutable } from "./node-runtime.js";
 import { RuntimePaths, BurnConfig } from "./types.js";
@@ -411,6 +412,14 @@ export function install(options: { dryRun?: boolean } = {}) {
       messages.push("  Get your key at: https://open.bigmodel.cn");
     }
   }
+  // The dropdown card needs baked glyph atlases; a failed bake must not fail
+  // the install — rendering falls back to text-only rows until a bake works.
+  try {
+    messages.push(...bakeGlyphAtlases(paths, { dryRun }));
+  } catch (error) {
+    messages.push(`Glyph atlas bake failed: ${error instanceof Error ? error.message : String(error)}`);
+    messages.push("The menu bar dropdown will use the text-only fallback; retry with: coding-usage-bar menubar bake-glyphs");
+  }
   messages.push(...ensureSwiftBarInstalled({ dryRun }));
   messages.push(...installMenuBar({ dryRun }));
   if (!dryRun) {
@@ -460,6 +469,15 @@ export function uninstall(options: { dryRun?: boolean; launchctlRunner?: Launchc
   }
 
   messages.push(...uninstallMenuBar({ dryRun }));
+
+  if (fs.existsSync(paths.glyphsDir)) {
+    if (dryRun) {
+      messages.push(`[dry-run] would remove glyph atlases: ${paths.glyphsDir}`);
+    } else {
+      fs.rmSync(paths.glyphsDir, { recursive: true, force: true });
+      messages.push(`Removed glyph atlases: ${paths.glyphsDir}`);
+    }
+  }
 
   const settings = readClaudeSettings(paths.claudeSettingsFile);
   const existing = getClaudeStatusLineCommand(settings);

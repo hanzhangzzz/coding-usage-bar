@@ -29,6 +29,7 @@ export function buildPaths(homeDir = os.homedir()): RuntimePaths {
     ),
     claudeSettingsFile: path.join(homeDir, ".claude", "settings.json"),
     claudeStatusLineScript: path.join(stateDir, "claude", "statusline.sh"),
+    glyphsDir: path.join(stateDir, "glyphs"),
   };
 }
 
