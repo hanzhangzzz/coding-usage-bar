@@ -1,5 +1,5 @@
 import { collectStatusSnapshot } from "./runtime.js";
-import { markNotified, sendNotification, shouldNotify } from "./notifier.js";
+import { markNotified, markRecovered, sendNotification, shouldNotify } from "./notifier.js";
 
 export async function runDaemonOnce(options: { dryRun?: boolean } = {}) {
   const snapshot = await collectStatusSnapshot();
@@ -7,6 +7,9 @@ export async function runDaemonOnce(options: { dryRun?: boolean } = {}) {
 
   for (const { analysis } of snapshot.providers) {
     if (!shouldNotify(analysis)) {
+      if (!options.dryRun) {
+        markRecovered(analysis);
+      }
       continue;
     }
     messages.push(sendNotification(analysis, options.dryRun));

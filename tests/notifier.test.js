@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildPaths } from "../dist/paths.js";
-import { iconForAnalysis, markNotified, shouldNotify } from "../dist/notifier.js";
+import { iconForAnalysis, markNotified, markRecovered, shouldNotify } from "../dist/notifier.js";
 import { notificationCardSvg } from "../dist/card.js";
 
 const analysis = {
@@ -17,16 +17,17 @@ const analysis = {
   message: "test",
 };
 
-test("notification cooldown suppresses repeated notifications", () => {
+test("persistent state notifies once, never on a periodic cooldown", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-home-"));
   const paths = buildPaths(home);
   assert.equal(shouldNotify(analysis, paths, new Date("2026-05-08T00:00:00.000Z")), true);
   markNotified(analysis, paths, new Date("2026-05-08T00:00:00.000Z"));
   assert.equal(shouldNotify(analysis, paths, new Date("2026-05-08T00:10:00.000Z")), false);
-  assert.equal(shouldNotify(analysis, paths, new Date("2026-05-08T00:31:00.000Z")), true);
+  assert.equal(shouldNotify(analysis, paths, new Date("2026-05-08T00:31:00.000Z")), false);
+  assert.equal(shouldNotify(analysis, paths, new Date("2026-05-08T01:59:00.000Z")), false);
 });
 
-test("notification cooldown resets when 5h window changes", () => {
+test("5h window change re-notifies a persistent state after the cooldown floor", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-home-"));
   const paths = buildPaths(home);
   markNotified(analysis, paths, new Date("2026-05-08T00:00:00.000Z"));
@@ -34,7 +35,50 @@ test("notification cooldown resets when 5h window changes", () => {
     ...analysis,
     fiveHour: { ...analysis.fiveHour, resetsAt: "2026-05-08T07:00:00.000Z" },
   };
-  assert.equal(shouldNotify(nextWindow, paths, new Date("2026-05-08T00:05:00.000Z")), true);
+  assert.equal(shouldNotify(nextWindow, paths, new Date("2026-05-08T00:05:00.000Z")), false);
+  assert.equal(shouldNotify(nextWindow, paths, new Date("2026-05-08T00:31:00.000Z")), true);
+});
+
+test("state transition notifies after the cooldown floor, not within it", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-home-"));
+  const paths = buildPaths(home);
+  markNotified(analysis, paths, new Date("2026-05-08T00:00:00.000Z"));
+  const escalated = { ...analysis, state: "LIMIT_RISK" };
+  assert.equal(shouldNotify(escalated, paths, new Date("2026-05-08T00:10:00.000Z")), false);
+  assert.equal(shouldNotify(escalated, paths, new Date("2026-05-08T00:31:00.000Z")), true);
+});
+
+test("recovery then re-entering an alert state notifies again", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-home-"));
+  const paths = buildPaths(home);
+  markNotified(analysis, paths, new Date("2026-05-08T00:00:00.000Z"));
+  markRecovered({ ...analysis, state: "ON_TRACK" }, paths);
+  assert.equal(shouldNotify(analysis, paths, new Date("2026-05-08T00:10:00.000Z")), false);
+  assert.equal(shouldNotify(analysis, paths, new Date("2026-05-08T00:31:00.000Z")), true);
+});
+
+test("markRecovered ignores providers that never alerted", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-home-"));
+  const paths = buildPaths(home);
+  markRecovered({ ...analysis, state: "ON_TRACK" }, paths);
+  assert.equal(shouldNotify(analysis, paths, new Date("2026-05-08T00:00:00.000Z")), true);
+});
+
+test("legacy provider:state records are dropped and re-notify once", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-home-"));
+  const paths = buildPaths(home);
+  fs.mkdirSync(path.dirname(paths.notificationStateFile), { recursive: true });
+  fs.writeFileSync(
+    paths.notificationStateFile,
+    JSON.stringify({
+      "claude:UNDER_BURN": { notifiedAt: "2026-05-08T00:00:00.000Z", resetAt: "2026-05-08T02:00:00.000Z" },
+    }),
+  );
+  assert.equal(shouldNotify(analysis, paths, new Date("2026-05-08T00:05:00.000Z")), true);
+  markNotified(analysis, paths, new Date("2026-05-08T00:05:00.000Z"));
+  const stored = JSON.parse(fs.readFileSync(paths.notificationStateFile, "utf8"));
+  assert.deepEqual(Object.keys(stored), ["claude"]);
+  assert.equal(shouldNotify(analysis, paths, new Date("2026-05-08T01:00:00.000Z")), false);
 });
 
 test("7d-only limit risk remains eligible for notification", () => {

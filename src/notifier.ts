@@ -9,11 +9,21 @@ import { formatDurationUntil } from "./format.js";
 import { writeNotificationCard } from "./card.js";
 
 interface NotificationRecord {
-  notifiedAt: string;
+  state: string;
+  notifiedAt?: string;
   resetAt?: string;
 }
 
 type NotificationState = Record<string, NotificationRecord>;
+
+// State is keyed by provider. Legacy records were keyed `provider:state` and
+// re-notified on a cooldown, which spammed osascript spawns all day; dropping
+// those keys makes each provider re-notify once after upgrade, then follow the
+// transition-based rules.
+function readNotificationState(paths: RuntimePaths): NotificationState {
+  const raw = readJsonFile<NotificationState>(paths.notificationStateFile) ?? {};
+  return Object.fromEntries(Object.entries(raw).filter(([key]) => !key.includes(":")));
+}
 
 export function commandExists(command: string) {
   const result = spawnSync("/bin/sh", ["-c", `command -v ${command}`], {
@@ -36,10 +46,9 @@ function cooldownMinutes(profile: "low" | "high") {
   return profile === "high" ? 15 : 30;
 }
 
-function notificationKey(analysis: BurnAnalysis) {
-  return `${analysis.provider}:${analysis.state}`;
-}
-
+// Notify only on a state transition or when the 5h window resets while the
+// alert persists — never on a periodic cooldown. The cooldown only acts as a
+// per-provider floor between notifications so a flapping state cannot spam.
 export function shouldNotify(
   analysis: BurnAnalysis,
   paths: RuntimePaths = buildPaths(),
@@ -48,14 +57,18 @@ export function shouldNotify(
   if (analysis.state === "RAW" || analysis.state === "ON_TRACK") {
     return false;
   }
-  const state = readJsonFile<NotificationState>(paths.notificationStateFile) ?? {};
-  const key = notificationKey(analysis);
-  const previous = state[key];
-  const resetAt = analysis.fiveHour?.resetsAt;
+  const previous = readNotificationState(paths)[analysis.provider];
   if (!previous) {
     return true;
   }
-  if (previous.resetAt && resetAt && previous.resetAt !== resetAt) {
+  if (previous.state === analysis.state) {
+    const resetAt = analysis.fiveHour?.resetsAt;
+    const sameWindow = !previous.resetAt || !resetAt || previous.resetAt === resetAt;
+    if (sameWindow) {
+      return false;
+    }
+  }
+  if (!previous.notifiedAt) {
     return true;
   }
   const elapsedMinutes = (now.getTime() - Date.parse(previous.notifiedAt)) / 60_000;
@@ -67,12 +80,32 @@ export function markNotified(
   paths: RuntimePaths = buildPaths(),
   now = new Date(),
 ) {
-  const state = readJsonFile<NotificationState>(paths.notificationStateFile) ?? {};
-  state[notificationKey(analysis)] = {
-    notifiedAt: now.toISOString(),
-    resetAt: analysis.fiveHour?.resetsAt,
-  };
-  writeJsonAtomic(paths.notificationStateFile, state);
+  const state = readNotificationState(paths);
+  writeJsonAtomic(paths.notificationStateFile, {
+    ...state,
+    [analysis.provider]: {
+      state: analysis.state,
+      notifiedAt: now.toISOString(),
+      resetAt: analysis.fiveHour?.resetsAt,
+    },
+  });
+}
+
+// Record recovery so the next entry into an alert state counts as a transition
+// and notifies again. Keeps notifiedAt so the anti-flap floor still applies.
+export function markRecovered(analysis: BurnAnalysis, paths: RuntimePaths = buildPaths()) {
+  if (analysis.state !== "ON_TRACK") {
+    return;
+  }
+  const state = readNotificationState(paths);
+  const previous = state[analysis.provider];
+  if (!previous || previous.state === "ON_TRACK") {
+    return;
+  }
+  writeJsonAtomic(paths.notificationStateFile, {
+    ...state,
+    [analysis.provider]: { ...previous, state: "ON_TRACK" },
+  });
 }
 
 function notificationText(analysis: BurnAnalysis) {
