@@ -10,17 +10,19 @@ When Claude Code writes a newer status-line usage observation, `status.json` mus
 
 ## Design
 
-Add a local-only snapshot refresh path that reads provider `latest.json` files and rebuilds `status.json` without live API calls, child processes, image rendering, or notification work.
+Add a local-only snapshot update path that replaces only Claude's entry in `status.json`, without live API calls, child processes, image rendering, notification work, or historical sample loading. The update reuses the previous analysis conversion rate, so it can recompute the current burn state without rescanning the growing samples file.
+
+All `status.json` read-modify-write operations use a short cross-process lock. Network collection stays outside the lock. This closes the final read/write race rather than merely making its timing window smaller.
 
 Claude status-line ingest will:
 
 1. Parse and persist the Claude observation as it does today.
-2. Refresh `status.json` from local provider caches so the new percentage is immediately visible.
+2. Acquire the short status lock and replace only the Claude provider entry so the new percentage is immediately visible.
 
 The daemon will:
 
 1. Perform its existing live collection.
-2. Immediately before building and saving `status.json`, reconcile every collected provider with its local cached observation.
+2. Acquire the short status lock immediately before building and saving `status.json`, then reconcile every collected provider with its local cached observation.
 3. Select the observation with the newer valid `observedAt`, preventing an in-flight collection from overwriting a newer producer write.
 
 The display boundary remains unchanged: `status` and `menubar render` continue to read only `status.json`.
@@ -28,6 +30,7 @@ The display boundary remains unchanged: `status` and `menubar render` continue t
 ## Performance constraints
 
 - Claude ingest adds only bounded local JSON reads and one atomic `status.json` write.
+- Claude ingest does not read or sort any provider `samples.jsonl`; cost does not grow with history size.
 - Claude ingest must not call any provider API, spawn a subprocess, send notifications, or render images.
 - Existing sample files are not appended again during snapshot refresh.
 - No extra work is added to the one-minute SwiftBar render path.
@@ -38,9 +41,9 @@ Status-line ingest remains successful after the Claude provider cache is persist
 
 ## Tests
 
-- A local-only refresh test proves a newly saved Claude observation immediately replaces the older Claude provider in `status.json` while preserving other cached providers.
+- A local-only update test proves a newly saved Claude observation immediately replaces the older Claude provider in `status.json` while preserving other providers.
 - A reconciliation test proves an older in-memory daemon observation cannot overwrite a newer Claude cache observation.
-- A performance-boundary test proves local refresh uses injected local loaders only and never invokes live collectors.
+- A performance-boundary test makes the Claude samples path unreadable and proves the update succeeds without accessing it.
 - Existing tests retain the invariant that display entry points do not collect raw provider data.
 
 ## Acceptance criteria
