@@ -1,6 +1,6 @@
 {
   "name": "coding-usage-bar",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "macOS menu bar usage monitor for Claude Code, Codex, GLM, DeepSeek, and MiniMax.",
   "author": "hanzhangzzz",
   "license": "MIT",
@@ -29,7 +29,7 @@
   ],
   "type": "module",
   "bin": {
-    "coding-usage-bar": "./dist/cli.js"
+    "coding-usage-bar": "dist/cli.js"
   },
   "files": [
     "assets",
