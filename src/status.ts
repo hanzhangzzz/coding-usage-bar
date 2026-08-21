@@ -1,10 +1,96 @@
-import { analyzeUsage } from "./burn.js";
-import { readJsonFile, writeJsonAtomic } from "./fs-util.js";
-import { buildPaths } from "./paths.js";
+import fs from "node:fs";
+import path from "node:path";
+import { analyzeUsage, analyzeUsageWithConversionRate } from "./burn.js";
+import { ensureDir, readJsonFile, writeJsonAtomic } from "./fs-util.js";
+import { buildPaths, providerLatestPath } from "./paths.js";
 import { loadSamples } from "./store.js";
 import { BurnProfile, ProviderUsage, RuntimePaths, StatusIssue, StatusSnapshot } from "./types.js";
 
 const DEFAULT_STALE_AFTER_SECONDS = 10 * 60;
+const STATUS_LOCK_RETRY_MS = 5;
+const STATUS_LOCK_TIMEOUT_MS = 2_000;
+const STATUS_LOCK_STALE_MS = 10_000;
+const lockWaitArray = new Int32Array(new SharedArrayBuffer(4));
+
+function waitForStatusLock() {
+  Atomics.wait(lockWaitArray, 0, 0, STATUS_LOCK_RETRY_MS);
+}
+
+export function withStatusSnapshotLock<T>(paths: RuntimePaths, action: () => T): T {
+  const lockFile = `${paths.statusFile}.lock`;
+  const deadline = Date.now() + STATUS_LOCK_TIMEOUT_MS;
+  ensureDir(path.dirname(lockFile));
+
+  let descriptor: number | null = null;
+  while (descriptor === null) {
+    try {
+      descriptor = fs.openSync(lockFile, "wx", 0o600);
+      fs.writeFileSync(descriptor, `${process.pid}\n`, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw error;
+      }
+      try {
+        const ageMs = Date.now() - fs.statSync(lockFile).mtimeMs;
+        if (ageMs > STATUS_LOCK_STALE_MS) {
+          fs.unlinkSync(lockFile);
+          continue;
+        }
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code === "ENOENT") {
+          continue;
+        }
+        throw statError;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for status snapshot lock at ${lockFile}`);
+      }
+      waitForStatusLock();
+    }
+  }
+
+  try {
+    return action();
+  } finally {
+    fs.closeSync(descriptor);
+    try {
+      fs.unlinkSync(lockFile);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+}
+
+function observedAtMs(usage: ProviderUsage) {
+  const value = Date.parse(usage.observedAt);
+  return Number.isFinite(value) ? value : null;
+}
+
+function newestUsage(usages: ProviderUsage[]) {
+  return usages.reduce((latest, candidate) => {
+    const latestTime = observedAtMs(latest);
+    const candidateTime = observedAtMs(candidate);
+    return candidateTime !== null && (latestTime === null || candidateTime > latestTime)
+      ? candidate
+      : latest;
+  });
+}
+
+export function reconcileLatestUsages(usages: ProviderUsage[], paths: RuntimePaths) {
+  return usages.map((usage) => {
+    const cached = readJsonFile<ProviderUsage>(providerLatestPath(paths, usage.provider));
+    if (!cached || cached.provider !== usage.provider) {
+      return usage;
+    }
+    const cachedTime = observedAtMs(cached);
+    const usageTime = observedAtMs(usage);
+    return cachedTime !== null && (usageTime === null || cachedTime > usageTime)
+      ? cached
+      : usage;
+  });
+}
 
 function buildProviderMeta(usage: ProviderUsage, generatedAt: Date, staleAfterSeconds: number) {
   const ageSeconds = Math.max(
@@ -112,4 +198,52 @@ export function saveStatusSnapshot(
 
 export function loadStatusSnapshot(paths: RuntimePaths = buildPaths()) {
   return readJsonFile<StatusSnapshot>(paths.statusFile);
+}
+
+export function replaceStatusSnapshotUsage(
+  existing: StatusSnapshot | null,
+  usage: ProviderUsage,
+  now = new Date(),
+) {
+  if (!existing) {
+    return createStatusSnapshot([usage], "low", {
+      generatedAt: now,
+      fixtureSamples: new Map([[usage.provider, []]]),
+    });
+  }
+
+  const previous = existing.providers.find((provider) => provider.usage.provider === usage.provider);
+  const selectedUsage = previous ? newestUsage([previous.usage, usage]) : usage;
+  const conversionRate = previous?.analysis.target?.conversionRate ?? null;
+  const provider = {
+    usage: selectedUsage,
+    analysis: analyzeUsageWithConversionRate(selectedUsage, conversionRate, existing.profile, now),
+    meta: buildProviderMeta(selectedUsage, now, DEFAULT_STALE_AFTER_SECONDS),
+  };
+  const providers = previous
+    ? existing.providers.map((item) => item.usage.provider === usage.provider ? provider : item)
+    : [...existing.providers, provider];
+  return refreshStatusSnapshotFreshness({
+    ...existing,
+    generatedAt: now.toISOString(),
+    providers,
+    issues: existing.issues.filter((issue) => (
+      issue.code !== "USAGE_STALE"
+      && !(issue.provider === usage.provider && issue.code === "CLAUDE_INGEST_MISSING")
+    )),
+  }, { now });
+}
+
+export function updateStatusSnapshotUsage(
+  usage: ProviderUsage,
+  paths: RuntimePaths = buildPaths(),
+) {
+  return withStatusSnapshotLock(paths, () => {
+    const now = new Date();
+    const existing = loadStatusSnapshot(paths);
+    const cached = reconcileLatestUsages([usage], paths)[0];
+    const snapshot = replaceStatusSnapshotUsage(existing, newestUsage([usage, cached]), now);
+    saveStatusSnapshot(snapshot, paths);
+    return snapshot;
+  });
 }

@@ -10,6 +10,7 @@ import { installMenuBar, renderMenuBar, uninstallMenuBar, toggleCompactMode } fr
 import { buildPaths } from "./paths.js";
 import { bakeGlyphAtlases } from "./glyphs.js";
 import { maybePromptForStar } from "./star.js";
+import { updateStatusSnapshotUsage } from "./status.js";
 
 function hasFlag(args: string[], flag: string) {
   return args.includes(flag);
@@ -133,6 +134,12 @@ async function main() {
       const parsed = JSON.parse(input);
       const usage = usageFromClaudeStatusLine(parsed);
       saveUsage(usage);
+      try {
+        updateStatusSnapshotUsage(usage);
+      } catch {
+        // The provider cache is authoritative. A later daemon run can rebuild
+        // status.json if this best-effort display update loses lock contention.
+      }
       return;
     }
 

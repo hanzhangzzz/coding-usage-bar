@@ -86,9 +86,9 @@ function messageForState(provider: ProviderId, state: BurnState, fiveUsed?: numb
   return `${label} burn pace is on track (${round(fiveUsed)}%, target ${round(target.min)}%-${round(target.max)}%).`;
 }
 
-export function analyzeUsage(
+function analyzeUsageWithRateResolver(
   usage: ProviderUsage,
-  samples: ProviderUsage[],
+  resolveConversionRate: () => number | null,
   profile: BurnProfile = "low",
   now = new Date(),
 ): BurnAnalysis {
@@ -139,7 +139,7 @@ export function analyzeUsage(
     };
   }
 
-  const conversionRate = estimateConversionRate(samples);
+  const conversionRate = resolveConversionRate();
   if (conversionRate === null) {
     return {
       provider: usage.provider,
@@ -184,4 +184,27 @@ export function analyzeUsage(
       max: target.maxPercent,
     }),
   };
+}
+
+export function analyzeUsageWithConversionRate(
+  usage: ProviderUsage,
+  conversionRate: number | null,
+  profile: BurnProfile = "low",
+  now = new Date(),
+) {
+  return analyzeUsageWithRateResolver(usage, () => conversionRate, profile, now);
+}
+
+export function analyzeUsage(
+  usage: ProviderUsage,
+  samples: ProviderUsage[],
+  profile: BurnProfile = "low",
+  now = new Date(),
+): BurnAnalysis {
+  return analyzeUsageWithRateResolver(
+    usage,
+    () => estimateConversionRate(samples),
+    profile,
+    now,
+  );
 }
