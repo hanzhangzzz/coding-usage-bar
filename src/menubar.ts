@@ -100,6 +100,33 @@ export function resetGlyphSetCache() {
   cachedGlyphSet = undefined;
 }
 
+// SwiftBar's comma-pair light/dark selection for dropdown images is
+// version-dependent: pre-2.1 mishandled it (#399) and 2.1.x fixed it
+// inverted — a light menu gets the dark half, which renders white text on a
+// light menu. So never emit a pair for the card; read the system appearance
+// here and emit the single matching image (a lone image renders identically
+// on every SwiftBar version). CODING_USAGE_BAR_APPEARANCE=light|dark
+// overrides for tests and manual forcing.
+function systemPrefersDark(): boolean {
+  const override = process.env.CODING_USAGE_BAR_APPEARANCE?.toLowerCase();
+  if (override === "dark") {
+    return true;
+  }
+  if (override === "light") {
+    return false;
+  }
+  try {
+    const style = execFileSync("defaults", ["read", "-g", "AppleInterfaceStyle"], {
+      encoding: "utf8",
+      timeout: 3000,
+    });
+    return style.trim() === "Dark";
+  } catch {
+    // The key is absent in light appearance.
+    return false;
+  }
+}
+
 function appCliPath(paths: RuntimePaths) {
   return path.join(paths.stateDir, "app", "dist", "cli.js");
 }
@@ -393,7 +420,12 @@ function providerIconPath(provider: string) {
   return fs.existsSync(iconPath) ? iconPath : null;
 }
 
-function titleImageValue(providers: StatusSnapshot["providers"]) {
+// Emits a single appearance-matched image (no light,dark pair) for the same
+// reason as the dropdown card: SwiftBar's pair selection is inverted in
+// 2.1.x, which would e.g. put the white dark-mode GLM mark on a light menu
+// bar. The dark title variant only differs in bar tones and dark logo marks,
+// but an inverted pick still degrades it.
+function titleImageValue(providers: StatusSnapshot["providers"], prefersDark: boolean) {
   const segments = providers.map((provider) => {
     const p = provider.usage.provider;
     const darkAsset = PROVIDER_ICON_DARK_ASSET[p];
@@ -436,18 +468,19 @@ function titleImageValue(providers: StatusSnapshot["providers"]) {
       barBgAlpha: 0.25,
     },
   };
-  const cacheKey = JSON.stringify(payload);
+  const cacheKey = `${prefersDark ? "dark" : "light"}:${JSON.stringify(payload)}`;
   if (titleImageCache.has(cacheKey)) {
     return titleImageCache.get(cacheKey);
   }
 
   try {
     const images = renderTitleImage(payload);
-    const value = images.light?.image && images.dark?.image && images.light.width && images.light.height
+    const chosen = prefersDark ? images.dark : images.light;
+    const value = chosen?.image && chosen.width && chosen.height
       ? {
-        image: `${images.light.image},${images.dark.image}`,
-        width: images.light.width,
-        height: images.light.height,
+        image: chosen.image,
+        width: chosen.width,
+        height: chosen.height,
       }
       : null;
     titleImageCache.set(cacheKey, value);
@@ -658,6 +691,7 @@ function usageCardValue(
   providers: StatusSnapshot["providers"],
   glyphs: GlyphSet,
   now: Date,
+  prefersDark: boolean,
 ) {
   const payload: UsageCardPayload = {
     profile: snapshot.profile.toUpperCase(),
@@ -665,17 +699,17 @@ function usageCardValue(
     providers: providers.map((item) => cardProviderBlock(item, now)),
     scale: TITLE_IMAGE_SCALE,
   };
-  const cacheKey = JSON.stringify(payload);
+  const cacheKey = `${prefersDark ? "dark" : "light"}:${JSON.stringify(payload)}`;
   if (usageCardCache.has(cacheKey)) {
     return usageCardCache.get(cacheKey) ?? null;
   }
   try {
-    const images = renderUsageCard(payload, glyphs);
-    const value = images.light?.image && images.dark?.image
+    const chosen = renderUsageCard(payload, glyphs, prefersDark ? "dark" : "light");
+    const value = chosen?.image
       ? {
-        image: `${images.light.image},${images.dark.image}`,
-        width: images.light.width,
-        height: images.light.height,
+        image: chosen.image,
+        width: chosen.width,
+        height: chosen.height,
       }
       : null;
     usageCardCache.set(cacheKey, value);
@@ -718,7 +752,8 @@ export function renderMenuBar(snapshot: StatusSnapshot = loadDisplayStatusSnapsh
     STATE_PRIORITY[left.analysis.state] - STATE_PRIORITY[right.analysis.state]
   ))[0]?.analysis.state
     ?? "RAW";
-  const titleImage = titleImageValue(providers);
+  const prefersDark = systemPrefersDark();
+  const titleImage = titleImageValue(providers, prefersDark);
   const lines = [
     compact
       ? line("", {
@@ -743,7 +778,7 @@ export function renderMenuBar(snapshot: StatusSnapshot = loadDisplayStatusSnapsh
   ];
 
   const glyphs = glyphSetFor(paths);
-  const card = glyphs ? usageCardValue(snapshot, providers, glyphs, now) : null;
+  const card = glyphs ? usageCardValue(snapshot, providers, glyphs, now, prefersDark) : null;
 
   if (card) {
     lines.push(line("", {

@@ -64,6 +64,7 @@ Coding Usage Bar 是独立开源项目，也是本工具的唯一事实源。它
 - 不要假设 `coding-usage-bar install` 写入的插件文件在 SwiftBar 重启后仍然保留。SwiftBar 可能在插件执行出错时清除或跳过插件文件。每次验证流程结束前都要重新检查。
 - SwiftBar 插件模板中 `swiftbar.refreshOnOpen` 必须是 `false`。该选项为 `true` 时，SwiftBar 会在每次展开 dropdown 时重新执行插件脚本（重跑 node + 多次 osascript 渲染图标/进度条 + base64 编码），用户点击菜单栏会感到明显卡顿。dropdown 里有 `Refresh now` 项 + SwiftBar 1 分钟自调度，refreshOnOpen 关闭后体验无损。
 - dropdown 的全部 provider 视觉内容必须合成为**单张复合卡片图**（`renderUsageCard`），全菜单 `image=` 项恒为 2（标题 + 卡片）。SwiftBar 在输出任意字节变化时整体重建菜单，重建成本随带图菜单项**数量**增长、与字节量无关（实测：17 个小图 = 每次数据刷新 6-8 秒 WindowServer 100%+ 风暴；标题 + 单卡 200KB = ≤2 秒单采样点波澜）。禁止回退到逐行小图；交互行（Refresh/Collapse/issues）保持纯文本。
+- 菜单栏和 dropdown 的图像**禁止使用 SwiftBar 的 `image=light,dark` 逗号双图语法**：该语法的明暗选择随 SwiftBar 版本漂移（2.1 之前 dropdown 双图有 #399 bug，2.1.x 的修复把三元写反了——亮色菜单反而取 dark 图，白字贴在亮菜单上不可读）。正确做法是渲染时用 `systemPrefersDark()`（读 `defaults read -g AppleInterfaceStyle`，可被 `CODING_USAGE_BAR_APPEARANCE=light|dark` 覆盖）自选变体，只输出**单张**图——单图在所有 SwiftBar 版本上行为一致。外观切换靠下一次 1 分钟渲染跟进。
 - 卡片文字由 install 时 `bakeGlyphAtlases`（一次性 osascript/AppKit，SF monospacedDigit 字形烘焙到 `~/.coding-usage-bar/glyphs/`）提供，运行时渲染进程绝不 spawn osascript/AppKit。字形图集缺失或损坏时，dropdown 必须退化为**零图纯文本行**（ANSI meter + SF Symbol 图标），用 `coding-usage-bar menubar bake-glyphs` 修复。回归测试必须覆盖：卡片模式 dropdown 恰好 1 个 image 项、fallback 模式 0 个 image 项、输出 byte-stable。
 
 ## Provider usage 解析原则

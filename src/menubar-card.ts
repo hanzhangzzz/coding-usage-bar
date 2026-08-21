@@ -255,9 +255,10 @@ function drawCard(payload: UsageCardPayload, glyphs: GlyphSet, mode: "light" | "
   };
 }
 
-export function renderUsageCard(payload: UsageCardPayload, glyphs: GlyphSet) {
-  return {
-    light: drawCard(payload, glyphs, "light"),
-    dark: drawCard(payload, glyphs, "dark"),
-  };
+// Renders a single appearance variant: the caller picks light or dark from
+// the current system appearance (see systemPrefersDark in menubar.ts) instead
+// of shipping a SwiftBar light,dark pair, whose selection is broken in
+// several SwiftBar versions.
+export function renderUsageCard(payload: UsageCardPayload, glyphs: GlyphSet, mode: "light" | "dark") {
+  return drawCard(payload, glyphs, mode);
 }

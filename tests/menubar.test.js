@@ -8,6 +8,11 @@ import { buildPaths } from "../dist/paths.js";
 import { encodePNG } from "../dist/png.js";
 import { GLYPH_STYLES } from "../dist/glyphs.js";
 
+// Deterministic appearance for every render in this file: image variant
+// selection happens at render time (SwiftBar's light,dark pair handling is
+// version-dependent), so tests must not depend on the machine's theme.
+process.env.CODING_USAGE_BAR_APPEARANCE = "light";
+
 function freshPaths() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-menubar-"));
   return buildPaths(home);
@@ -147,7 +152,7 @@ function pngInfoFromBase64(value) {
 test("renderMenuBar outputs SwiftBar-compatible status text", () => {
   const output = renderMenuBar(snapshot, freshPaths());
 
-  assert.match(output, /^ \| image=[A-Za-z0-9+/=]+,[A-Za-z0-9+/=]+ width=\d+ height=22 dropdown=false tooltip=5H:0%,7D:35%\\ │\\ 5H:31%,7D:69%/);
+  assert.match(output, /^ \| image=[A-Za-z0-9+/=]+ width=\d+ height=22 dropdown=false tooltip=5H:0%,7D:35%\\ │\\ 5H:31%,7D:69%/);
   assert.match(output, /\n---\n/);
   assert.match(output, /Coding Usage Bar \| color=#111827,#F9FAFB size=15 sfimage=flame\.fill/);
   assert.match(output, /Codex  Low \| sfimage=[a-z.]+ color=#111827,#F9FAFB size=14/);
@@ -292,7 +297,7 @@ test("renderMenuBar shows Expand toggle in compact mode", () => {
     // Compact title should have sfimage=flame.fill without image= or wide text
     const titleLine = output.split("\n")[0];
     assert.match(titleLine, /sfimage=flame\.fill/);
-    assert.doesNotMatch(titleLine, /image=[A-Za-z0-9+/=]+,[A-Za-z0-9+/=]+/);
+    assert.doesNotMatch(titleLine, / image=/);
   } finally {
     // Restore full mode
     toggleCompactMode(paths);
@@ -353,11 +358,16 @@ test("renderMenuBar renders the dropdown as a single card image when glyph atlas
   const paths = freshPaths();
   writeFixtureGlyphs(paths);
   resetGlyphSetCache();
+  process.env.CODING_USAGE_BAR_APPEARANCE = "light";
   try {
     const output = renderMenuBar(snapshot, paths, new Date("2026-05-08T01:00:00.000Z"));
     const dropdownImageLines = output.split("\n").slice(1).filter((entry) => / image=/.test(entry));
     assert.equal(dropdownImageLines.length, 1, "dropdown must contain exactly one card image item");
-    assert.match(dropdownImageLines[0], /^ \| image=[A-Za-z0-9+/=]+,[A-Za-z0-9+/=]+ width=460 height=\d+/);
+    // Single image, no light,dark comma pair: SwiftBar's pair selection for
+    // dropdown items is version-dependent and inverted in 2.1.x, so the
+    // appearance variant is chosen at render time instead.
+    assert.match(dropdownImageLines[0], /^ \| image=[A-Za-z0-9+/=]+ width=460 height=\d+/);
+    assert.doesNotMatch(dropdownImageLines[0], /image=[^ ]*,/);
     // Provider text rows collapse into the card; interactive rows stay text.
     assert.doesNotMatch(output, /Codex {2}Low \|/);
     assert.match(output, /Refresh now \| refresh=true/);
@@ -375,7 +385,14 @@ test("renderMenuBar renders the dropdown as a single card image when glyph atlas
     assert.doesNotMatch(withError, /WARNING/);
     const second = renderMenuBar(snapshot, paths, new Date("2026-05-08T01:01:30.000Z"));
     assert.equal(output, second, "card output must stay byte-identical while the snapshot is unchanged");
+
+    process.env.CODING_USAGE_BAR_APPEARANCE = "dark";
+    const darkOutput = renderMenuBar(snapshot, paths, new Date("2026-05-08T01:00:00.000Z"));
+    const darkCardLine = darkOutput.split("\n").slice(1).find((entry) => / image=/.test(entry));
+    assert.ok(darkCardLine, "dark appearance must still emit the card");
+    assert.notEqual(darkCardLine, dropdownImageLines[0], "dark appearance must select a different card variant");
   } finally {
+    process.env.CODING_USAGE_BAR_APPEARANCE = "light";
     resetGlyphSetCache();
   }
 });
