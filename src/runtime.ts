@@ -14,8 +14,11 @@ import { BurnAnalysis, BurnProfile, ProviderUsage, RuntimePaths, StatusIssue, St
 import {
   createStatusSnapshot,
   loadStatusSnapshot,
+  reconcileLatestUsages,
+  replaceStatusSnapshotUsage,
   refreshStatusSnapshotFreshness,
   saveStatusSnapshot,
+  withStatusSnapshotLock,
 } from "./status.js";
 
 const FIXTURES_DIR = fileURLToPath(new URL("../fixtures", import.meta.url));
@@ -261,17 +264,52 @@ export function analyzeFixtureUsages(usages: ProviderUsage[], profile: BurnProfi
   return createStatusSnapshot(usages, profile, { fixtureSamples }).providers.map((provider) => provider.analysis);
 }
 
+export function commitCollectedStatusSnapshot(
+  usages: ProviderUsage[],
+  issues: StatusIssue[],
+  options: {
+    paths?: RuntimePaths;
+    profile?: BurnProfile;
+    generatedAt?: Date;
+    fixtureSamples?: Map<string, ProviderUsage[]>;
+  } = {},
+) {
+  const paths = options.paths ?? buildPaths();
+  const profile = options.profile ?? readProfile();
+  const now = options.generatedAt ?? new Date();
+  const candidate = createStatusSnapshot(usages, profile, {
+    paths,
+    generatedAt: now,
+    fixtureSamples: options.fixtureSamples,
+    issues,
+  });
+  return withStatusSnapshotLock(paths, () => {
+    const existing = loadStatusSnapshot(paths);
+    const cached = reconcileLatestUsages(usages, paths);
+    let snapshot = candidate;
+    for (const usage of cached) {
+      snapshot = replaceStatusSnapshotUsage(snapshot, usage, now);
+    }
+    if (existing) {
+      for (const provider of existing.providers) {
+        snapshot = replaceStatusSnapshotUsage(snapshot, provider.usage, now);
+      }
+    }
+    saveStatusSnapshot(snapshot, paths);
+    return snapshot;
+  });
+}
+
 export async function collectStatusSnapshot(options: { fixtures?: boolean } = {}) {
   const { usages, issues } = await collectLocalState(options);
   const profile = readProfile();
   const fixtureSamples = options.fixtures
     ? new Map<string, ProviderUsage[]>(usages.map((usage) => [usage.provider, loadFixtureSamples(usage.provider)]))
     : undefined;
-  const snapshot = createStatusSnapshot(usages, profile, { fixtureSamples, issues });
   if (!options.fixtures) {
-    saveStatusSnapshot(snapshot);
+    return commitCollectedStatusSnapshot(usages, issues, { profile });
   }
-  return snapshot;
+  return createStatusSnapshot(usages, profile, { fixtureSamples, issues });
 }
 
 export function loadDisplayStatusSnapshot(
