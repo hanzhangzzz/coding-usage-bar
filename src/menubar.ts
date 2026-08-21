@@ -116,9 +116,15 @@ function systemPrefersDark(): boolean {
     return false;
   }
   try {
+    // `defaults` writes a timestamped PID line plus a "does not exist" error
+    // to stderr even on a successful read; in light mode the key is missing,
+    // so the child exits non-zero and execFileSync attaches that stderr to
+    // the thrown Error. Pipe-discard for stderr prevents either path from
+    // leaking into render output and breaking SwiftBar byte-stability.
     const style = execFileSync("defaults", ["read", "-g", "AppleInterfaceStyle"], {
       encoding: "utf8",
       timeout: 3000,
+      stdio: ["ignore", "pipe", "ignore"],
     });
     return style.trim() === "Dark";
   } catch {
