@@ -1,9 +1,9 @@
 import { readJsonFile, writeJsonAtomic } from "./fs-util.js";
 import { buildPaths } from "./paths.js";
-import { BurnConfig, GlmConfig, DeepseekConfig, MinimaxConfig, KimiConfig, ProviderId, RuntimePaths } from "./types.js";
+import { BurnConfig, ProviderId, RuntimePaths } from "./types.js";
 
-const DEFAULT_PROVIDERS: ProviderId[] = ["codex", "claude", "glm", "deepseek", "minimax", "kimi"];
-const PROVIDERS = new Set<ProviderId>(["codex", "claude", "glm", "deepseek", "minimax", "kimi"]);
+const DEFAULT_PROVIDERS: ProviderId[] = ["codex", "claude", "glm", "deepseek", "minimax", "kimi", "qwen"];
+const PROVIDERS = new Set<ProviderId>(["codex", "claude", "glm", "deepseek", "minimax", "kimi", "qwen"]);
 
 function normalizeProviders(value: unknown): ProviderId[] {
   if (!Array.isArray(value)) {
@@ -30,6 +30,7 @@ export function defaultConfig(): BurnConfig {
     deepseek: { apiKey: "" },
     minimax: { region: "cn", apiKey: "" },
     kimi: { apiKey: "" },
+    qwen: { plan: "auto" },
   };
 }
 
@@ -49,6 +50,7 @@ export function readConfig(paths: RuntimePaths = buildPaths()): BurnConfig {
     deepseek: fileConfig.deepseek ?? defaultConfig().deepseek,
     minimax: fileConfig.minimax ?? defaultConfig().minimax,
     kimi: fileConfig.kimi ?? defaultConfig().kimi,
+    qwen: fileConfig.qwen ?? defaultConfig().qwen,
   };
 }
 
@@ -73,6 +75,10 @@ export function ensureConfig(paths: RuntimePaths = buildPaths()) {
   const current = readJsonFile<Partial<BurnConfig>>(paths.configFile) ?? latest;
   if (!current.kimi) {
     writeJsonAtomic(paths.configFile, { ...current, kimi: defaultConfig().kimi });
+  }
+  const withKimi = readJsonFile<Partial<BurnConfig>>(paths.configFile) ?? current;
+  if (!withKimi.qwen) {
+    writeJsonAtomic(paths.configFile, { ...withKimi, qwen: defaultConfig().qwen });
   }
   return false;
 }

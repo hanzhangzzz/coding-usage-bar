@@ -8,6 +8,8 @@ Coding Usage Bar 是独立开源项目，也是本工具的唯一事实源。它
 
 - 不处理登录态，不托管凭据，不把 API key 上传到任何中间服务；GLM、DeepSeek、MiniMax 的 key 只从本地配置读取并直接发送给对应 Provider API。
 - Kimi 的 key 优先读 `~/.coding-usage-bar/config.json` 的 `kimi.apiKey`；为空时回退到 `~/.config/claude-lanes/config.env` 中 `CONFIG_<n>_BASE_URL` 指向 kimi.com 的 lane（用其 `AUTH_TOKEN` 和 base URL），不硬编码 lane 编号。
+- Qwen（阿里云百炼）没有 API Key 可达的额度接口：`sk-`/`sk-sp-` key 只能跑推理，额度只存在于控制台会话背后。因此 Qwen 用量通过官方百炼 CLI（`bl`，npm 包 `bailian-cli`）读取——由它持有登录态（`~/.bailian/config.json`），本工具不保存、不处理任何阿里云凭据。这与「读 Codex session 文件、包 Claude status line」是同一设计谱系：复用官方工具已有的凭据和产物。绝不要为 Qwen 引入手动复制浏览器 Cookie 的方案。
+- Qwen 有两种独立订阅产品，`bl` 各有查询命令，collector 依次探测：Token Plan（`bl usage token-plan`，按 token 抵扣 Credits，返回 `per5HourPercentage`/`per1WeekPercentage` 的 0-1 比值）和 Coding Plan（`bl usage coding-plan`，按调用次数计费，返回每窗口 `usedQuota`/`totalQuota` 计数加现成比值，另有本项目不建模的月度窗口）。用户无法从 `sk-sp-` key 区分自己是哪种，不要让用户在 config 里声明套餐类型，默认 `plan: "auto"` 两个都探测。
 - 不主动请求 Claude/Codex 的内部 usage backend；v1 只使用本机已有 usage 结果。
 - Codex 数据源是 `~/.codex` session/rollout JSONL 中的 `payload.rate_limits`。
 - Claude 数据源是 `coding-usage-bar ingest claude-statusline` 写入的 `~/.coding-usage-bar/claude/latest.json`。
@@ -23,7 +25,7 @@ Coding Usage Bar 是独立开源项目，也是本工具的唯一事实源。它
 - 用户入口是 `npx coding-usage-bar install`。
 - 日常命令是 `coding-usage-bar doctor` 和 `coding-usage-bar status`。
 - 普通 commit 不自动发布。只有明确准备 Release 时才更新版本、发布 npm 并创建 GitHub Release。
-- provider 监控范围由 `~/.coding-usage-bar/config.json` 的 `providers` 控制，默认 `["codex", "claude", "glm", "deepseek", "minimax", "kimi"]`；临时覆盖可用 `CODING_USAGE_BAR_PROVIDERS=codex,claude`。
+- provider 监控范围由 `~/.coding-usage-bar/config.json` 的 `providers` 控制，默认 `["codex", "claude", "glm", "deepseek", "minimax", "kimi", "qwen"]`；临时覆盖可用 `CODING_USAGE_BAR_PROVIDERS=codex,claude`。新增 provider 只进 `DEFAULT_PROVIDERS` 和 `ensureConfig` 的配置块迁移，**不改写用户已有 config 的 `providers` 数组**（沿用 Kimi 先例，避免复活用户主动移除的 provider）；老用户需手动把新 provider 加进 `providers`。
 - v1 完整支持 macOS launchd；Windows 只保留通知/调度设计，不承诺可用。
 - 安装器必须把当前构建产物复制到 `~/.coding-usage-bar/app/`，launchd 只能指向该稳定副本，不能指向 npx 临时缓存。
 - 安装器必须创建用户级 CLI shim：`~/.local/bin/coding-usage-bar -> ~/.coding-usage-bar/app/dist/cli.js`，否则 `coding-usage-bar doctor/status` 不能作为日常命令直接使用。
@@ -73,6 +75,7 @@ Coding Usage Bar 是独立开源项目，也是本工具的唯一事实源。它
 - MiniMax 的 `/v1/token_plan/remains` 对每个 model 返回两套信号：count 维度（`current_*_usage_count` / `current_*_total_count`，适用于 video 等配额计数型）和 percent 维度（`current_*_remaining_percent`，0-100，适用于 general 这种信用消耗型）。`general` 的 `total_count` 永远是 0，必须从 `100 - remaining_percent` 推出 used%；如果只看 count 维度，credit-based 账户会永远显示 0%。
 - 同样的原则适用于其它可能扩展 percent 字段的 provider：解析时优先取真实信号，不要因为一种信号缺省就 0% 兜底，而要看另一种信号是否给出真实值。
 - GLM 的 `TOKENS_LIMIT` 在零用量新窗口时**整个省略 `nextResetTime`**（与 Kimi 省略零值 `used` 同款坑）：不能对该字段裸调 `new Date(...).toISOString()`（抛 `Invalid time value` 会毁掉整次 live 采集），也不能因缺 reset time 丢弃真实的 0% 信号。窗口识别按 shape（unit 3 + number 5 = 5h，unit 6 + number 1 = 周窗口），不能只按 nextResetTime 排序；reset time 缺省时用 observedAt 兜底（展示为 reset due）。
+- Qwen Coding Plan 同样有两种信号：现成的 `percentage`（0-1 比值）和 `usedQuota`/`totalQuota` 计数。优先取 `percentage`，缺省时用 `used/total` 推导，两者都缺必须判定为「该窗口无数据」返回 null，**不能 0% 兜底**——0% 会让用户以为额度全新。Token Plan 的 `per5HourResetTime`/`per1WeekResetTime` 可能整个缺省（同 GLM 零用量坑），此时用 observedAt 兜底，绝不能因缺 reset time 丢掉真实的百分比信号。
 - 解析逻辑变动必须同步加测试覆盖两种信号（count > 0、percent-only、两者都缺）。
 
 ## 验证
