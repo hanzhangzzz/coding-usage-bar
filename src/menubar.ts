@@ -300,6 +300,19 @@ export function openSwiftBar() {
   return messages;
 }
 
+// Whether SwiftBar auto-starts at login. Returns null when the login item list
+// cannot be queried (Automation permission denied or non-interactive context).
+export function isSwiftBarInLoginItems(): boolean | null {
+  try {
+    const result = execFileSync("osascript", [
+      "-e", 'tell application "System Events" to get the name of every login item',
+    ], { encoding: "utf8" });
+    return result.split(",").map((name) => name.trim()).includes("SwiftBar");
+  } catch {
+    return null;
+  }
+}
+
 export function addSwiftBarToLoginItems(options: { dryRun?: boolean } = {}) {
   const dryRun = options.dryRun ?? false;
   const appPath = swiftBarAppPath();
@@ -307,15 +320,8 @@ export function addSwiftBarToLoginItems(options: { dryRun?: boolean } = {}) {
     return ["SwiftBar is not installed; skipping login item."];
   }
 
-  try {
-    const result = execFileSync("osascript", [
-      "-e", 'tell application "System Events" to get the name of every login item',
-    ], { encoding: "utf8" });
-    if (result.includes("SwiftBar")) {
-      return ["SwiftBar already in login items."];
-    }
-  } catch {
-    // Permission or access issue; try to add anyway.
+  if (isSwiftBarInLoginItems()) {
+    return ["SwiftBar already in login items."];
   }
 
   if (dryRun) {
@@ -330,6 +336,96 @@ export function addSwiftBarToLoginItems(options: { dryRun?: boolean } = {}) {
   } catch (error) {
     return [`Failed to add SwiftBar to login items: ${error instanceof Error ? error.message : String(error)}. Add manually in System Settings → General → Login Items.`];
   }
+}
+
+export interface PluginRunResult {
+  ok: boolean;
+  output: string;
+}
+
+// Execute the installed plugin exactly the way SwiftBar would and check it
+// produces a real menu. The plugin prints "Usage ERR" with exit code 0 on
+// failure, so a non-error status alone proves nothing.
+function runPluginScript(file: string): PluginRunResult {
+  try {
+    const stdout = execFileSync(file, { encoding: "utf8", timeout: 30000 });
+    const output = stdout.trim();
+    return { ok: output.length > 0 && !output.startsWith("Usage ERR"), output };
+  } catch (error) {
+    return { ok: false, output: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+const MENU_BAR_MANUAL_STEPS = [
+  "Menu bar is NOT ready yet. Fix it with these steps:",
+  "  1. If macOS is showing an Automation/Accessibility permission prompt, click Allow.",
+  "  2. Open SwiftBar: open -a SwiftBar",
+  "  3. If the icon is still missing, macOS may have folded it away: System Settings → Control Center → Menu Bar.",
+  "  4. Re-run: coding-usage-bar doctor --fix",
+];
+
+const LOGIN_ITEM_WARNING = [
+  "WARN SwiftBar is not in login items: the menu bar icon will disappear after a reboot.",
+  "     If macOS showed a System Events Automation prompt, allow it and re-run coding-usage-bar install,",
+  "     or add SwiftBar manually: System Settings → General → Login Items.",
+];
+
+export interface VerifyMenuBarOptions {
+  dryRun?: boolean;
+  runPlugin?: (file: string) => PluginRunResult;
+  loginItems?: () => boolean | null;
+  swiftBarInstalled?: () => boolean;
+  swiftBarRunning?: () => boolean;
+  repairPlugin?: () => string[];
+  launchSwiftBar?: () => string[];
+}
+
+// End-to-end acceptance at the end of install: the plugin exists, SwiftBar is
+// running, and the plugin actually renders a menu. Auto-repairs once, then
+// falls back to numbered manual steps instead of failing silently.
+export function verifyMenuBarSetup(options: VerifyMenuBarOptions = {}) {
+  if (options.dryRun) {
+    return ["[dry-run] would verify the SwiftBar plugin renders and the menu bar item appears"];
+  }
+
+  const paths = buildPaths();
+  const plugin = swiftBarPluginPath(paths);
+  const isInstalled = options.swiftBarInstalled ?? isSwiftBarInstalled;
+  const isRunning = options.swiftBarRunning ?? isSwiftBarRunning;
+  const messages: string[] = [];
+
+  if (!isInstalled()) {
+    return [
+      ...MENU_BAR_MANUAL_STEPS,
+      `  (SwiftBar is not installed. Install it with: brew install --cask swiftbar, then re-run coding-usage-bar install.)`,
+    ];
+  }
+
+  if (!isFile(plugin.file)) {
+    messages.push(...(options.repairPlugin ?? installMenuBar)());
+  }
+
+  if (!isRunning()) {
+    messages.push(...(options.launchSwiftBar ?? openSwiftBar)());
+  }
+
+  if (!isFile(plugin.file)) {
+    return [...messages, ...MENU_BAR_MANUAL_STEPS, `  (Plugin file missing: ${plugin.file})`];
+  }
+
+  const run = (options.runPlugin ?? runPluginScript)(plugin.file);
+  if (!run.ok || !isRunning()) {
+    return [...messages, ...MENU_BAR_MANUAL_STEPS];
+  }
+
+  messages.push("");
+  messages.push("Menu bar ready — Coding Usage Bar should now appear at the top-right of your menu bar.");
+
+  if ((options.loginItems ?? isSwiftBarInLoginItems)() === false) {
+    messages.push(...LOGIN_ITEM_WARNING);
+  }
+
+  return messages;
 }
 
 function swiftBarEscape(value: string) {

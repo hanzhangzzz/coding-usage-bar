@@ -33,6 +33,16 @@ coding-usage-bar status
 - 每 5 分钟采集一次用量的 launchd 任务
 - 写入 SwiftBar 当前插件目录的菜单栏插件
 
+安装结束时会自动验收菜单栏是否就绪，最后一行出现 `Menu bar ready` 即表示图标已出现在菜单栏右上角。
+
+## 常见问题
+
+**安装后菜单栏没有图标？**
+
+1. 执行 `coding-usage-bar doctor --fix`：自动重启 SwiftBar、补装菜单栏插件、补加 SwiftBar 登录项、补采 status 数据。
+2. macOS 可能把菜单栏图标折叠隐藏了：系统设置 → 控制中心 → 菜单栏，检查隐藏区。
+3. 如果 macOS 弹过 System Events 的"自动化"权限框且被拒绝，SwiftBar 将无法开机自启：在 系统设置 → 隐私与安全性 → 自动化 中放行，再执行一次 `coding-usage-bar install`。
+
 ## 核心特点
 
 - 一个菜单栏同时查看多个 AI 编程 Provider

@@ -7,7 +7,17 @@ import { isDir, isFile } from "./fs-util.js";
 import { resolveKimiConfig } from "./kimi.js";
 import { buildPaths, providerLatestPath } from "./paths.js";
 import { notificationBackend } from "./notifier.js";
-import { isSwiftBarInstalled, isSwiftBarRunning, swiftBarPluginPath } from "./menubar.js";
+import {
+  addSwiftBarToLoginItems,
+  ensureSwiftBarInstalled,
+  installMenuBar,
+  isSwiftBarInstalled,
+  isSwiftBarInLoginItems,
+  isSwiftBarRunning,
+  openSwiftBar,
+  swiftBarPluginPath,
+} from "./menubar.js";
+import { runDaemonOnce } from "./daemon.js";
 import { DoctorCheck } from "./types.js";
 
 function stableClaudeIngestHint() {
@@ -256,17 +266,127 @@ export function runDoctor(options: { dryRun?: boolean } = {}): DoctorCheck[] {
   const swiftBarRunning = pluginPresent && isSwiftBarRunning();
   checks.push({
     name: "Menu bar",
-    ok: pluginPresent,
+    ok: pluginPresent && swiftBarRunning,
     message: swiftBarInstalled
       ? isFile(swiftBarPlugin.file)
         ? swiftBarRunning
           ? `SwiftBar plugin installed and SwiftBar running: ${swiftBarPlugin.file}`
-          : `SwiftBar plugin installed but SwiftBar is not running (menu bar item hidden); run: open -a SwiftBar`
-        : `SwiftBar found; run coding-usage-bar menubar install`
-      : "SwiftBar not found; install SwiftBar, then run coding-usage-bar menubar install",
+          : "SwiftBar plugin installed but SwiftBar is not running (menu bar item hidden); run: coding-usage-bar doctor --fix"
+        : "SwiftBar found; run: coding-usage-bar doctor --fix"
+      : "SwiftBar not found; run: coding-usage-bar doctor --fix (installs SwiftBar via Homebrew)",
+  });
+
+  if (process.platform === "darwin") {
+    if (options.dryRun) {
+      checks.push({
+        name: "SwiftBar login item",
+        ok: true,
+        message: "[dry-run] would check whether SwiftBar auto-starts at login",
+      });
+    } else if (!swiftBarInstalled) {
+      checks.push({
+        name: "SwiftBar login item",
+        ok: true,
+        message: "skipped (SwiftBar not installed)",
+      });
+    } else {
+      const inLoginItems = isSwiftBarInLoginItems();
+      checks.push({
+        name: "SwiftBar login item",
+        ok: inLoginItems !== false,
+        message: inLoginItems === null
+          ? "could not verify (Automation permission denied?); if the icon disappears after reboot, check System Settings → General → Login Items"
+          : inLoginItems
+            ? "SwiftBar auto-starts at login"
+            : "not in login items; the menu bar icon disappears after reboot. Run: coding-usage-bar doctor --fix",
+      });
+    }
+  }
+
+  checks.push({
+    name: "Status data",
+    ok: options.dryRun ? true : isFile(paths.statusFile),
+    message: options.dryRun
+      ? `[dry-run] would read ${paths.statusFile}`
+      : isFile(paths.statusFile)
+        ? `found ${paths.statusFile}`
+        : `missing ${paths.statusFile}; run coding-usage-bar doctor --fix or coding-usage-bar daemon --once`,
   });
 
   return checks;
+}
+
+export interface DoctorFixProbes {
+  swiftBarInstalled?: () => boolean;
+  pluginPresent?: () => boolean;
+  swiftBarRunning?: () => boolean;
+  swiftBarInLoginItems?: () => boolean | null;
+  statusFilePresent?: () => boolean;
+}
+
+export interface DoctorFixEffects {
+  installSwiftBar?: () => string[];
+  installPlugin?: () => string[];
+  launchSwiftBar?: () => string[];
+  addLoginItem?: () => string[];
+  collectStatus?: () => Promise<string[]>;
+}
+
+export interface DoctorFixOptions {
+  dryRun?: boolean;
+  probes?: DoctorFixProbes;
+  effects?: DoctorFixEffects;
+}
+
+// One-command self-healing for the common "installed but the menu bar icon is
+// gone" failures: missing SwiftBar, missing plugin, SwiftBar not running,
+// SwiftBar missing from login items, and missing status data.
+export async function runDoctorFix(options: DoctorFixOptions = {}): Promise<string[]> {
+  if (options.dryRun) {
+    return ["[dry-run] would repair SwiftBar, the menu bar plugin, login items, and status data automatically"];
+  }
+
+  const paths = buildPaths();
+  const probes = {
+    swiftBarInstalled: options.probes?.swiftBarInstalled ?? isSwiftBarInstalled,
+    pluginPresent: options.probes?.pluginPresent ?? (() => isFile(swiftBarPluginPath(paths).file)),
+    swiftBarRunning: options.probes?.swiftBarRunning ?? isSwiftBarRunning,
+    swiftBarInLoginItems: options.probes?.swiftBarInLoginItems ?? isSwiftBarInLoginItems,
+    statusFilePresent: options.probes?.statusFilePresent ?? (() => isFile(paths.statusFile)),
+  };
+  const effects = {
+    installSwiftBar: options.effects?.installSwiftBar ?? (() => ensureSwiftBarInstalled()),
+    installPlugin: options.effects?.installPlugin ?? (() => installMenuBar()),
+    launchSwiftBar: options.effects?.launchSwiftBar ?? (() => openSwiftBar()),
+    addLoginItem: options.effects?.addLoginItem ?? (() => addSwiftBarToLoginItems()),
+    collectStatus: options.effects?.collectStatus ?? (async () => runDaemonOnce()),
+  };
+
+  const messages: string[] = [];
+
+  let swiftBarInstalled = probes.swiftBarInstalled();
+  if (!swiftBarInstalled) {
+    messages.push(...effects.installSwiftBar());
+    swiftBarInstalled = probes.swiftBarInstalled();
+  }
+
+  if (!probes.pluginPresent()) {
+    messages.push(...effects.installPlugin());
+  }
+
+  if (swiftBarInstalled && !probes.swiftBarRunning()) {
+    messages.push(...effects.launchSwiftBar());
+  }
+
+  if (probes.swiftBarInLoginItems() === false) {
+    messages.push(...effects.addLoginItem());
+  }
+
+  if (!probes.statusFilePresent()) {
+    messages.push(...(await effects.collectStatus()));
+  }
+
+  return messages;
 }
 
 export function formatDoctor(checks: DoctorCheck[]) {

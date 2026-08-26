@@ -33,6 +33,16 @@ coding-usage-bar status
 
 `install` creates a local runtime at `~/.coding-usage-bar/app`, a user-level CLI shim at `~/.local/bin/coding-usage-bar`, a launchd agent, a default config file, and a SwiftBar menu bar plugin. Make sure `~/.local/bin` is in your `PATH`.
 
+## Troubleshooting
+
+**Menu bar icon not showing after install?**
+
+1. Run `coding-usage-bar doctor --fix`. It relaunches SwiftBar, reinstalls the menu bar plugin if missing, re-adds SwiftBar to login items, and collects status data.
+2. macOS may fold menu bar icons away: check System Settings → Control Center → Menu Bar.
+3. If macOS showed an Automation permission prompt (System Events) and it was denied, SwiftBar cannot auto-start at login: allow it under System Settings → Privacy & Security → Automation, then run `coding-usage-bar install` again.
+
+`coding-usage-bar install` verifies at the end that the plugin actually renders and prints `Menu bar ready`; if that line is missing, the numbered steps it prints tell you exactly what to do.
+
 ## Commands
 
 | Command | Purpose |
@@ -40,6 +50,7 @@ coding-usage-bar status
 | `coding-usage-bar install` | Install runtime, launchd checker, SwiftBar host/plugin, and Claude ingest when safe |
 | `coding-usage-bar uninstall` | Remove Coding Usage Bar managed launchd/status line/plugin config |
 | `coding-usage-bar doctor` | Check local Codex/Claude/GLM usage sources and notification backend |
+| `coding-usage-bar doctor --fix` | Repair common issues: missing SwiftBar/plugin, SwiftBar not running, login item, status data |
 | `coding-usage-bar status` | Print the rolling windows reported by each account and their pacing state from `~/.coding-usage-bar/status.json` |
 | `coding-usage-bar status --json` | Print the same status snapshot written to `~/.coding-usage-bar/status.json` |
 | `coding-usage-bar status --refresh` | Re-collect local usage before printing status |

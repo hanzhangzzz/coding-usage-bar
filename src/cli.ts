@@ -5,7 +5,7 @@ import { saveUsage } from "./store.js";
 import { formatStatusRows, formatAnalysisDetail, formatIssues, formatProviderMeta } from "./format.js";
 import { loadDisplayStatusSnapshot, collectStatusSnapshot } from "./runtime.js";
 import { runDaemonOnce } from "./daemon.js";
-import { doctorHasFailures, formatDoctor, runDoctor } from "./doctor.js";
+import { doctorHasFailures, formatDoctor, runDoctor, runDoctorFix } from "./doctor.js";
 import { installMenuBar, renderMenuBar, uninstallMenuBar, toggleCompactMode } from "./menubar.js";
 import { buildPaths } from "./paths.js";
 import { bakeGlyphAtlases } from "./glyphs.js";
@@ -22,7 +22,7 @@ function printHelp() {
 Usage:
   coding-usage-bar install [--dry-run]
   coding-usage-bar uninstall [--dry-run]
-  coding-usage-bar doctor [--dry-run]
+  coding-usage-bar doctor [--dry-run] [--fix]
   coding-usage-bar status [--fixtures] [--json] [--refresh]
   coding-usage-bar menubar render
   coding-usage-bar menubar install [--dry-run]
@@ -64,9 +64,21 @@ async function main() {
     }
 
     if (command === "doctor") {
+      const fix = hasFlag(args, "--fix");
+      if (fix) {
+        const fixes = await runDoctorFix({ dryRun });
+        if (fixes.length > 0) {
+          console.log(fixes.join("\n"));
+          console.log("");
+        }
+      }
       const checks = runDoctor({ dryRun });
       console.log(formatDoctor(checks));
       if (doctorHasFailures(checks)) {
+        if (!fix) {
+          console.log("");
+          console.log("Run coding-usage-bar doctor --fix to repair common issues automatically.");
+        }
         process.exitCode = 1;
       }
       return;
