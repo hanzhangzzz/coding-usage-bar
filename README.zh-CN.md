@@ -12,7 +12,7 @@ Claude Code 与 Codex 的数据直接读取它们在本机产生的文件，不�
 
 ## 真实 SwiftBar 菜单
 
-以下截图来自正在运行的 SwiftBar 插件；动画复现菜单的展开与收起，不修改截图中的用量数据。
+菜单栏标题与下拉面板均截自正在运行的 SwiftBar 插件，仅叠加纯色桌面背景；动画复现菜单的展开与收起，不修改截图中的用量数据。
 
 <p align="center">
   <img src="docs/assets/demo.gif" alt="打开 Coding Usage Bar 的真实 SwiftBar 菜单，查看 Codex、Claude、GLM、DeepSeek、MiniMax 和 Kimi 用量" width="800">

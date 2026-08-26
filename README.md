@@ -17,7 +17,7 @@ Claude Code and Codex data stays local and is read from files those tools alread
 
 ## Live SwiftBar Menu
 
-The screenshot is captured from the live SwiftBar plugin. The animation reproduces opening and closing that menu without altering the captured usage data.
+The menu bar title and the dropdown panel are captured from the live SwiftBar plugin and placed on a plain backdrop. The animation reproduces opening and closing that menu without altering the captured usage data.
 
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Opening the live Coding Usage Bar SwiftBar menu with Codex, Claude, GLM, DeepSeek, MiniMax, and Kimi usage" width="800">
