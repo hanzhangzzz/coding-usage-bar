@@ -9,6 +9,7 @@ Coding Usage Bar 是独立开源项目，也是本工具的唯一事实源。它
 - 不处理登录态，不托管凭据，不把 API key 上传到任何中间服务；GLM、DeepSeek、MiniMax 的 key 只从本地配置读取并直接发送给对应 Provider API。
 - Kimi 的 key 优先读 `~/.coding-usage-bar/config.json` 的 `kimi.apiKey`；为空时回退到 `~/.config/claude-lanes/config.env` 中 `CONFIG_<n>_BASE_URL` 指向 kimi.com 的 lane（用其 `AUTH_TOKEN` 和 base URL），不硬编码 lane 编号。
 - Qwen（阿里云百炼）没有 API Key 可达的额度接口：`sk-`/`sk-sp-` key 只能跑推理，额度只存在于控制台会话背后。因此 Qwen 用量通过官方百炼 CLI（`bl`，npm 包 `bailian-cli`）读取——由它持有登录态（`~/.bailian/config.json`），本工具不保存、不处理任何阿里云凭据。这与「读 Codex session 文件、包 Claude status line」是同一设计谱系：复用官方工具已有的凭据和产物。绝不要为 Qwen 引入手动复制浏览器 Cookie 的方案。
+- **Qwen 解析契约尚未经真账号验证**（截至 2026-08-26）：本项目无 Token Plan / Coding Plan 订阅，未登录、无订阅、`bl` 缺失三条路径已用真实 `bl` 二进制验证，但**有订阅时返回的真实数字没跑过**；解析逻辑逐字提取自 `modelstudioai/cli` 开源实现。issue #2 报告者确认前不要合并 PR #5，也不要把 Qwen 写进 README 的"已验证"表述。拿到真实 JSON 后核对字段并删除本条。
 - Qwen 有两种独立订阅产品，`bl` 各有查询命令，collector 依次探测：Token Plan（`bl usage token-plan`，按 token 抵扣 Credits，返回 `per5HourPercentage`/`per1WeekPercentage` 的 0-1 比值）和 Coding Plan（`bl usage coding-plan`，按调用次数计费，返回每窗口 `usedQuota`/`totalQuota` 计数加现成比值，另有本项目不建模的月度窗口）。用户无法从 `sk-sp-` key 区分自己是哪种，不要让用户在 config 里声明套餐类型，默认 `plan: "auto"` 两个都探测。
 - 不主动请求 Claude/Codex 的内部 usage backend；v1 只使用本机已有 usage 结果。
 - Codex 数据源是 `~/.codex` session/rollout JSONL 中的 `payload.rate_limits`。
