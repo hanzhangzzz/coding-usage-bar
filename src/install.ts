@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { claudeStatusLineHasIngest, getClaudeStatusLineCommand, readClaudeSettings } from "./claude.js";
 import { ensureConfig, readConfig } from "./config.js";
 import { ensureDir, isFile, readJsonFile, writeJsonAtomic } from "./fs-util.js";
-import { addSwiftBarToLoginItems, ensureSwiftBarInstalled, installMenuBar, openSwiftBar, uninstallMenuBar } from "./menubar.js";
+import { addSwiftBarToLoginItems, ensureSwiftBarInstalled, installMenuBar, openSwiftBar, uninstallMenuBar, verifyMenuBarSetup } from "./menubar.js";
 import { bakeGlyphAtlases } from "./glyphs.js";
 import { buildPaths } from "./paths.js";
 import { stableNodeExecutable } from "./node-runtime.js";
@@ -433,12 +433,14 @@ export function install(options: { dryRun?: boolean } = {}) {
   if (dryRun) {
     messages.push(`[dry-run] would write launchd plist: ${paths.launchAgentFile}`);
     messages.push(`[dry-run] ProgramArguments: ${[...args, "daemon", "--once"].join(" ")}`);
+    messages.push(...verifyMenuBarSetup({ dryRun }));
     return messages;
   }
 
   fs.writeFileSync(paths.launchAgentFile, xml, "utf8");
   restartLaunchAgent(paths.launchAgentFile);
   messages.push(`Installed and restarted launchd agent: ${paths.launchAgentFile}`);
+  messages.push(...verifyMenuBarSetup());
   return messages;
 }
 

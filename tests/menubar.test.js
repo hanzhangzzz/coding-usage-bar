@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { renderMenuBar, swiftBarStatusItemVisibilityKeys, readCompactMode, toggleCompactMode, resetGlyphSetCache } from "../dist/menubar.js";
+import { renderMenuBar, swiftBarStatusItemVisibilityKeys, readCompactMode, toggleCompactMode, resetGlyphSetCache, verifyMenuBarSetup } from "../dist/menubar.js";
 import { buildPaths } from "../dist/paths.js";
 import { encodePNG } from "../dist/png.js";
 import { GLYPH_STYLES } from "../dist/glyphs.js";
@@ -408,4 +408,144 @@ test("renderMenuBar dropdown stays image-free without glyph atlases", () => {
   } finally {
     resetGlyphSetCache();
   }
+});
+
+// --- verifyMenuBarSetup ------------------------------------------------------
+// End-to-end install acceptance. All environment probes and repair effects are
+// injected so the suite never depends on (or touches) the host's SwiftBar.
+
+function sandboxVerifyEnv() {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-verify-"));
+  const pluginDir = path.join(home, "swiftbar-plugins");
+  fs.mkdirSync(pluginDir, { recursive: true });
+  return { home, pluginDir, pluginFile: path.join(pluginDir, "coding-usage-bar.1m.js") };
+}
+
+function withSandbox(fn) {
+  const sandbox = sandboxVerifyEnv();
+  const originalHome = process.env.HOME;
+  const originalPluginDir = process.env.CODING_USAGE_BAR_PLUGIN_DIR;
+  process.env.HOME = sandbox.home;
+  process.env.CODING_USAGE_BAR_PLUGIN_DIR = sandbox.pluginDir;
+  try {
+    return fn(sandbox);
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    if (originalPluginDir === undefined) {
+      delete process.env.CODING_USAGE_BAR_PLUGIN_DIR;
+    } else {
+      process.env.CODING_USAGE_BAR_PLUGIN_DIR = originalPluginDir;
+    }
+  }
+}
+
+test("verifyMenuBarSetup dry-run only announces", () => {
+  assert.deepEqual(
+    verifyMenuBarSetup({ dryRun: true }),
+    ["[dry-run] would verify the SwiftBar plugin renders and the menu bar item appears"],
+  );
+});
+
+test("verifyMenuBarSetup reports ready when plugin renders and SwiftBar runs", () => {
+  withSandbox(({ pluginFile }) => {
+    fs.writeFileSync(pluginFile, "#!/usr/bin/env node\n", { mode: 0o755 });
+    const messages = verifyMenuBarSetup({
+      swiftBarInstalled: () => true,
+      swiftBarRunning: () => true,
+      runPlugin: () => ({ ok: true, output: "| image=…" }),
+      loginItems: () => true,
+    });
+    assert.ok(messages.some((message) => message.includes("Menu bar ready")));
+    assert.ok(!messages.some((message) => message.includes("NOT ready")));
+    assert.ok(!messages.some((message) => message.includes("WARN")));
+  });
+});
+
+test("verifyMenuBarSetup repairs a missing plugin and launches a stopped SwiftBar", () => {
+  withSandbox(({ pluginFile }) => {
+    const repairs = [];
+    const launches = [];
+    // Stateful: SwiftBar reads as stopped until the launch effect succeeds,
+    // mirroring the real pgrep check against a process that just started.
+    let swiftBarRunning = false;
+    const messages = verifyMenuBarSetup({
+      swiftBarInstalled: () => true,
+      swiftBarRunning: () => swiftBarRunning,
+      repairPlugin: () => {
+        repairs.push("plugin");
+        fs.writeFileSync(pluginFile, "#!/usr/bin/env node\n", { mode: 0o755 });
+        return ["Installed SwiftBar plugin"];
+      },
+      launchSwiftBar: () => {
+        launches.push("swiftbar");
+        swiftBarRunning = true;
+        return ["Opened SwiftBar."];
+      },
+      runPlugin: () => ({ ok: true, output: "| image=…" }),
+      loginItems: () => true,
+    });
+    assert.deepEqual(repairs, ["plugin"]);
+    assert.deepEqual(launches, ["swiftbar"]);
+    assert.ok(messages.some((message) => message.includes("Menu bar ready")));
+  });
+});
+
+test("verifyMenuBarSetup falls back to manual steps when the plugin fails to render", () => {
+  withSandbox(({ pluginFile }) => {
+    fs.writeFileSync(pluginFile, "#!/usr/bin/env node\n", { mode: 0o755 });
+    const messages = verifyMenuBarSetup({
+      swiftBarInstalled: () => true,
+      swiftBarRunning: () => true,
+      runPlugin: () => ({ ok: false, output: "Usage ERR" }),
+      loginItems: () => true,
+    });
+    assert.ok(messages.some((message) => message.includes("Menu bar is NOT ready yet")));
+    assert.ok(messages.some((message) => message.includes("coding-usage-bar doctor --fix")));
+    assert.ok(!messages.some((message) => message.includes("Menu bar ready —")));
+  });
+});
+
+test("verifyMenuBarSetup falls back to manual steps when SwiftBar stays stopped", () => {
+  withSandbox(({ pluginFile }) => {
+    fs.writeFileSync(pluginFile, "#!/usr/bin/env node\n", { mode: 0o755 });
+    const messages = verifyMenuBarSetup({
+      swiftBarInstalled: () => true,
+      swiftBarRunning: () => false,
+      launchSwiftBar: () => ["Launched SwiftBar, but it did not start within 8s."],
+      runPlugin: () => ({ ok: true, output: "| image=…" }),
+      loginItems: () => true,
+    });
+    assert.ok(messages.some((message) => message.includes("Menu bar is NOT ready yet")));
+    assert.ok(!messages.some((message) => message.includes("Menu bar ready —")));
+  });
+});
+
+test("verifyMenuBarSetup warns when SwiftBar is missing from login items", () => {
+  withSandbox(({ pluginFile }) => {
+    fs.writeFileSync(pluginFile, "#!/usr/bin/env node\n", { mode: 0o755 });
+    const messages = verifyMenuBarSetup({
+      swiftBarInstalled: () => true,
+      swiftBarRunning: () => true,
+      runPlugin: () => ({ ok: true, output: "| image=…" }),
+      loginItems: () => false,
+    });
+    assert.ok(messages.some((message) => message.includes("Menu bar ready")));
+    assert.ok(messages.some((message) => message.includes("WARN SwiftBar is not in login items")));
+  });
+});
+
+test("verifyMenuBarSetup reports missing SwiftBar with install instructions", () => {
+  withSandbox(() => {
+    const messages = verifyMenuBarSetup({
+      swiftBarInstalled: () => false,
+      runPlugin: () => ({ ok: true, output: "unused" }),
+    });
+    assert.ok(messages.some((message) => message.includes("SwiftBar is not installed")));
+    assert.ok(messages.some((message) => message.includes("brew install --cask swiftbar")));
+    assert.ok(!messages.some((message) => message.includes("Menu bar ready —")));
+  });
 });
