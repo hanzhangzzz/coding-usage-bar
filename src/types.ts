@@ -1,4 +1,4 @@
-export type ProviderId = "claude" | "codex" | "glm" | "deepseek" | "minimax" | "kimi";
+export type ProviderId = "claude" | "codex" | "glm" | "deepseek" | "minimax" | "kimi" | "qwen";
 export type WindowName = "five_hour" | "seven_day";
 export type BurnProfile = "low" | "high";
 export type BurnState =
@@ -76,6 +76,13 @@ export interface KimiConfig {
   apiKey?: string;
 }
 
+// Qwen quota is read through the official Bailian CLI (bl); we store no
+// Alibaba credentials, only how to reach the binary and which plan to query.
+export interface QwenConfig {
+  blPath?: string;
+  plan?: "auto" | "token-plan" | "coding-plan";
+}
+
 export interface RuntimePaths {
   homeDir: string;
   stateDir: string;
@@ -86,6 +93,7 @@ export interface RuntimePaths {
   deepseekDir: string;
   minimaxDir: string;
   kimiDir: string;
+  qwenDir: string;
   notificationStateFile: string;
   statusFile: string;
   starPromptFile: string;
@@ -130,4 +138,5 @@ export interface BurnConfig {
   deepseek?: DeepseekConfig;
   minimax?: MinimaxConfig;
   kimi?: KimiConfig;
+  qwen?: QwenConfig;
 }

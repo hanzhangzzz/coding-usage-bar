@@ -1,7 +1,7 @@
 {
   "name": "coding-usage-bar",
   "version": "0.4.1",
-  "description": "macOS menu bar usage monitor for Claude Code, Codex, GLM, DeepSeek, and MiniMax.",
+  "description": "macOS menu bar usage monitor for Claude Code, Codex, GLM, DeepSeek, MiniMax, Kimi, and Qwen.",
   "author": "hanzhangzzz",
   "license": "MIT",
   "repository": {
@@ -45,7 +45,8 @@
     "build": "tsc && chmod +x dist/cli.js",
     "test": "npm run build && node --test tests/*.test.js",
     "clean": "rm -rf dist",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "prepare": "npm run build"
   },
   "engines": {
     "node": ">=20"

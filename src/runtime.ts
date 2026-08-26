@@ -8,6 +8,7 @@ import { collectGlmUsage } from "./glm.js";
 import { collectDeepseekUsage } from "./deepseek.js";
 import { collectKimiUsage, resolveKimiConfig } from "./kimi.js";
 import { collectMinimaxUsage } from "./minimax.js";
+import { collectQwenUsage, resolveBlBinary } from "./qwen.js";
 import { buildPaths } from "./paths.js";
 import { loadLatestUsage, loadSamples, saveUsage } from "./store.js";
 import { BurnAnalysis, BurnProfile, ProviderUsage, RuntimePaths, StatusIssue, StatusSnapshot } from "./types.js";
@@ -24,7 +25,7 @@ import {
 const FIXTURES_DIR = fileURLToPath(new URL("../fixtures", import.meta.url));
 
 export function loadFixtureUsages(fixturesDir: string): ProviderUsage[] {
-  const providers = ["claude", "codex", "glm", "deepseek", "minimax", "kimi"] as const;
+  const providers = ["claude", "codex", "glm", "deepseek", "minimax", "kimi", "qwen"] as const;
   return providers
     .map((provider) => readJsonFile<ProviderUsage>(path.join(fixturesDir, provider, "latest.json")))
     .filter((item): item is ProviderUsage => item !== null);
@@ -221,6 +222,42 @@ export async function collectLocalState(options: { fixtures?: boolean } = {}): P
             provider: "kimi",
             severity: "error",
             code: "KIMI_USAGE_MISSING",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+  }
+
+  if (monitored.has("qwen")) {
+    const qwenConfig = config.qwen ?? {};
+    if (!resolveBlBinary(qwenConfig)) {
+      issues.push({
+        provider: "qwen",
+        severity: "warning",
+        code: "QWEN_BL_MISSING",
+        message: "Bailian CLI (bl) not found. Install with npm install -g bailian-cli and run bl auth login --console, or remove qwen from ~/.coding-usage-bar/config.json providers.",
+      });
+    } else {
+      try {
+        const qwen = await collectQwenUsage(qwenConfig);
+        saveUsage(qwen, paths);
+        usages.push(qwen);
+      } catch (error) {
+        const cached = loadLatestUsage("qwen", paths);
+        if (cached) {
+          usages.push(cached);
+          issues.push({
+            provider: "qwen",
+            severity: "warning",
+            code: "QWEN_USING_CACHE",
+            message: `Qwen live usage unavailable; using cached usage from ${cached.observedAt}. ${error instanceof Error ? error.message : String(error)}`,
+          });
+        } else {
+          issues.push({
+            provider: "qwen",
+            severity: "error",
+            code: "QWEN_USAGE_MISSING",
             message: error instanceof Error ? error.message : String(error),
           });
         }

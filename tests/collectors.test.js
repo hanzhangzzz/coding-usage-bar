@@ -8,6 +8,7 @@ import { collectCodexUsage } from "../dist/codex.js";
 import { collectKimiUsage, probeKimiAccessFrozen, readClaudeLanesKimiConfig, resolveKimiConfig, usageFromKimiUsages } from "../dist/kimi.js";
 import { usageFromMinimaxQuota } from "../dist/minimax.js";
 import { usageFromGlmQuota } from "../dist/glm.js";
+import { collectQwenUsage, describeBlFailure, parseBlJson, usageFromQwenCodingPlan, usageFromQwenTokenPlan } from "../dist/qwen.js";
 
 test("usageFromClaudeStatusLine normalizes status line rate limits", () => {
   const usage = usageFromClaudeStatusLine({
@@ -628,4 +629,139 @@ test("usageFromGlmQuota still returns null when token windows are missing", () =
     },
   }, { source: "test" });
   assert.equal(usage, null);
+});
+
+test("usageFromQwenTokenPlan maps 0-1 ratios and epoch-ms resets", () => {
+  const usage = usageFromQwenTokenPlan({
+    per5HourPercentage: 0.0105,
+    per5HourResetTime: Date.parse("2026-08-26T10:00:00Z"),
+    per1WeekPercentage: 0.42,
+    per1WeekResetTime: Date.parse("2026-08-31T16:00:00Z"),
+  }, { source: "test" });
+
+  assert.ok(usage);
+  assert.equal(usage.provider, "qwen");
+  assert.equal(usage.planType, "token-plan");
+  assert.equal(usage.windows[0].usedPercent, 1.05);
+  assert.equal(usage.windows[0].resetsAt, "2026-08-26T10:00:00.000Z");
+  assert.equal(usage.windows[1].usedPercent, 42);
+  assert.equal(usage.windows[1].windowMinutes, 10080);
+});
+
+test("usageFromQwenTokenPlan keeps real percentages when reset times are omitted", () => {
+  const usage = usageFromQwenTokenPlan(
+    { per5HourPercentage: 0, per1WeekPercentage: 0.003 },
+    { source: "test", observedAt: "2026-08-26T00:00:00.000Z" },
+  );
+
+  assert.ok(usage);
+  assert.equal(usage.windows[0].usedPercent, 0);
+  assert.equal(usage.windows[0].resetsAt, "2026-08-26T00:00:00.000Z");
+});
+
+test("usageFromQwenTokenPlan returns null without an active subscription", () => {
+  assert.equal(usageFromQwenTokenPlan({}, { source: "test" }), null);
+  assert.equal(usageFromQwenTokenPlan(null, { source: "test" }), null);
+  assert.equal(usageFromQwenTokenPlan({ per5HourPercentage: 0.5 }, { source: "test" }), null);
+});
+
+test("usageFromQwenCodingPlan prefers ratio and derives from counts as fallback", () => {
+  const missingWeek = usageFromQwenCodingPlan({
+    instanceType: "pro",
+    per5Hour: { usedQuota: 38, totalQuota: 6000, percentage: 0.0063, resetTime: Date.parse("2026-08-26T10:00:00Z") },
+  }, { source: "test" });
+  assert.equal(missingWeek, null);
+
+  const derived = usageFromQwenCodingPlan({
+    instanceType: "pro",
+    per5Hour: { percentage: 0.5, resetTime: Date.parse("2026-08-26T10:00:00Z") },
+    perWeek: { usedQuota: 4500, totalQuota: 45000, resetTime: Date.parse("2026-09-01T00:00:00Z") },
+    perBillMonth: { usedQuota: 9000, totalQuota: 90000 },
+  }, { source: "test" });
+
+  assert.ok(derived);
+  assert.equal(derived.planType, "coding-plan pro");
+  assert.equal(derived.windows[0].usedPercent, 50);
+  assert.equal(derived.windows[1].usedPercent, 10);
+});
+
+test("usageFromQwenCodingPlan never fakes 0% when both signals are missing", () => {
+  const usage = usageFromQwenCodingPlan({
+    per5Hour: { resetTime: Date.parse("2026-08-26T10:00:00Z") },
+    perWeek: { percentage: 0.1, resetTime: Date.parse("2026-09-01T00:00:00Z") },
+  }, { source: "test" });
+  assert.equal(usage, null);
+});
+
+test("parseBlJson tolerates banner noise around the JSON object", () => {
+  assert.deepEqual(parseBlJson('Update available!\n{"per5HourPercentage":0.1}\n'), { per5HourPercentage: 0.1 });
+  assert.equal(parseBlJson(""), null);
+  assert.equal(parseBlJson("not json at all"), null);
+});
+
+function writeFakeBl(dir, script) {
+  const file = path.join(dir, "bl");
+  fs.writeFileSync(file, `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+  return file;
+}
+
+test("collectQwenUsage reads token plan usage through the bl binary", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-qwen-"));
+  const bl = writeFakeBl(dir, `echo '{"per5HourPercentage":0.2,"per5HourResetTime":1756202400000,"per1WeekPercentage":0.05,"per1WeekResetTime":1756656000000}'`);
+
+  const usage = await collectQwenUsage({ blPath: bl });
+  assert.equal(usage.provider, "qwen");
+  assert.equal(usage.planType, "token-plan");
+  assert.equal(usage.windows[0].usedPercent, 20);
+});
+
+test("collectQwenUsage falls back to coding plan when token plan is empty", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-qwen-"));
+  const bl = writeFakeBl(dir, `if [ "$2" = "token-plan" ]; then echo '{}'; else echo '{"instanceType":"pro","per5Hour":{"percentage":0.01,"resetTime":1756202400000},"perWeek":{"percentage":0.02,"resetTime":1756656000000}}'; fi`);
+
+  const usage = await collectQwenUsage({ blPath: bl });
+  assert.equal(usage.planType, "coding-plan pro");
+  assert.equal(usage.windows[1].usedPercent, 2);
+});
+
+test("collectQwenUsage surfaces the bl auth error message and hint verbatim", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-qwen-"));
+  const bl = writeFakeBl(dir, `cat >&2 <<'JSON'
+{"error":{"code":3,"message":"No console access token found.","hint":"Run \`bl auth login --console\`."}}
+JSON
+exit 3`);
+
+  await assert.rejects(
+    () => collectQwenUsage({ blPath: bl }),
+    (error) => {
+      assert.match(error.message, /No console access token found/);
+      assert.match(error.message, /bl auth login --console/);
+      // auto mode must not probe the second plan and repeat the same failure
+      assert.equal(error.message.match(/No console access token/g).length, 1);
+      return true;
+    },
+  );
+});
+
+test("describeBlFailure falls back to raw output when the envelope is absent", () => {
+  const plain = describeBlFailure("token-plan", "", "boom: network unreachable", "spawn failed");
+  assert.match(plain.message, /boom: network unreachable/);
+  assert.equal(plain.isAuth, false);
+
+  const empty = describeBlFailure("token-plan", "", "", "spawn ETIMEDOUT");
+  assert.match(empty.message, /spawn ETIMEDOUT/);
+});
+
+test("collectQwenUsage throws when bl is not installed", async () => {
+  await assert.rejects(
+    () => collectQwenUsage({ blPath: "/nonexistent/definitely/bl" }),
+    /Bailian CLI \(bl\) not found/,
+  );
+});
+
+test("collectQwenUsage reports no-subscription when both plans return empty", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-qwen-"));
+  const bl = writeFakeBl(dir, `echo '{}'`);
+
+  await assert.rejects(() => collectQwenUsage({ blPath: bl }), /No active Qwen/);
 });
