@@ -137,29 +137,92 @@ function appCliPath(paths: RuntimePaths) {
   return path.join(paths.stateDir, "app", "dist", "cli.js");
 }
 
-const COMPACT_MODE_FILE = "compact-mode";
+// macOS offers no way to ask "will this title fit?". An item wider than the
+// space left over is not clipped -- it is pushed left, under the notch and
+// into the app menu area, and disappears with no trace in any log. So the
+// width is chosen up front from a measured budget, and the narrowest tier is
+// a floor the render can always retreat to.
+export type TitleTier = "full" | "single" | "icon";
+export type TitleMode = "auto" | TitleTier;
 
-function compactModeFilePath(paths: RuntimePaths) {
-  return path.join(paths.stateDir, COMPACT_MODE_FILE);
+const TITLE_MODE_CYCLE: TitleMode[] = ["auto", "full", "single", "icon"];
+
+const TITLE_TIER_LABEL: Record<TitleTier, string> = {
+  full: "Full",
+  single: "Single",
+  icon: "Icon",
+};
+
+// Measured on a notched 13" (2560x1664, 1470pt logical, 645pt right of the
+// notch): the six-provider composite is 511pt wide including SwiftBar's item
+// padding, a single-provider one is 68pt. The system's own extras (clock,
+// Control Center, input menu, Spotlight) claim ~240pt before any third-party
+// icon shows up, so `full` needs a budget well beyond its own width to be
+// safe -- 645pt of notch-side bar cannot hold it even with nothing else
+// installed.
+const FULL_TIER_MIN_BUDGET_PT = 900;
+const SINGLE_TIER_MIN_BUDGET_PT = 350;
+
+// Name kept from the pre-tier boolean toggle: an existing empty marker file
+// means the user had compact on, which is the icon tier now.
+const TITLE_MODE_FILE = "compact-mode";
+
+function titleModeFilePath(paths: RuntimePaths) {
+  return path.join(paths.stateDir, TITLE_MODE_FILE);
 }
 
-export function readCompactMode(paths: RuntimePaths = buildPaths()): boolean {
+export function readTitleMode(paths: RuntimePaths = buildPaths()): TitleMode {
   try {
-    return fs.existsSync(compactModeFilePath(paths));
+    const raw = fs.readFileSync(titleModeFilePath(paths), "utf8").trim();
+    if (raw === "") {
+      return "icon";
+    }
+    return (TITLE_MODE_CYCLE as string[]).includes(raw) ? raw as TitleMode : "auto";
   } catch {
-    return false;
+    // Absent file (and any unreadable state) means hands off: let the measured
+    // budget decide.
+    return "auto";
   }
 }
 
-export function toggleCompactMode(paths: RuntimePaths = buildPaths()): boolean {
-  const filePath = compactModeFilePath(paths);
-  if (fs.existsSync(filePath)) {
+export function writeTitleMode(mode: TitleMode, paths: RuntimePaths = buildPaths()): TitleMode {
+  const filePath = titleModeFilePath(paths);
+  if (mode === "auto") {
     fs.rmSync(filePath, { force: true });
-    return false;
+    return "auto";
   }
   ensureDir(paths.stateDir);
-  fs.writeFileSync(filePath, "");
-  return true;
+  fs.writeFileSync(filePath, `${mode}\n`);
+  return mode;
+}
+
+export function cycleTitleMode(paths: RuntimePaths = buildPaths()): TitleMode {
+  const current = readTitleMode(paths);
+  const next = TITLE_MODE_CYCLE[(TITLE_MODE_CYCLE.indexOf(current) + 1) % TITLE_MODE_CYCLE.length];
+  return writeTitleMode(next, paths);
+}
+
+export function pickTitleTier(
+  display: StatusSnapshot["display"],
+  providerCount: number,
+): TitleTier {
+  if (providerCount === 0) {
+    return "icon";
+  }
+  const budget = display?.extrasBudgetPt;
+  if (typeof budget !== "number" || !Number.isFinite(budget)) {
+    // No measurement yet: fresh install, non-macOS host, or a failed probe.
+    // Assume the cramped case. Guessing `single` wrong costs detail; guessing
+    // `full` wrong costs the entire menu bar item.
+    return "single";
+  }
+  if (budget >= FULL_TIER_MIN_BUDGET_PT) {
+    return "full";
+  }
+  if (budget >= SINGLE_TIER_MIN_BUDGET_PT) {
+    return "single";
+  }
+  return "icon";
 }
 
 function configuredSwiftBarPluginDir(paths: RuntimePaths) {
@@ -657,6 +720,70 @@ function titleIconParams() {
   return { sfimage: "flame.fill", sfcolor: RAW_COLOR };
 }
 
+// Sort is stable per spec, so TITLE_PROVIDER_ORDER survives as the tie-break
+// and the same snapshot always elects the same provider. Byte-stable output is
+// what lets SwiftBar skip the menu rebuild.
+function mostUrgentProvider(providers: StatusSnapshot["providers"]) {
+  return [...providers].sort((left, right) => (
+    STATE_PRIORITY[left.analysis.state] - STATE_PRIORITY[right.analysis.state]
+  ))[0];
+}
+
+// The invariant this whole ladder exists for: every path out of here carries a
+// visual. Missing assets, a PNG failure, an empty tier -- none of them may end
+// with an item that renders as nothing, because "renders as nothing" is
+// indistinguishable from "the tool is broken".
+function titleLine(
+  tier: TitleTier,
+  providers: StatusSnapshot["providers"],
+  title: string,
+  topState: BurnState,
+  prefersDark: boolean,
+) {
+  const iconLine = () => line("", {
+    sfimage: "flame.fill",
+    sfcolor: STATE_COLOR[topState],
+    dropdown: false,
+    tooltip: title,
+  });
+  if (tier === "icon") {
+    return iconLine();
+  }
+
+  const urgent = tier === "single" ? mostUrgentProvider(providers) : undefined;
+  const shown = urgent ? [urgent] : providers;
+  const image = titleImageValue(shown, prefersDark);
+  if (image) {
+    return line("", {
+      image: image.image,
+      width: image.width,
+      height: image.height,
+      dropdown: false,
+      tooltip: title,
+    });
+  }
+
+  const text = urgent ? titleSegment(urgent) : title;
+  return text
+    ? line(text, { ...titleIconParams(), dropdown: false })
+    : iconLine();
+}
+
+function titleModeLabel(mode: TitleMode, autoTier: TitleTier) {
+  return mode === "auto"
+    ? `Title  Auto (${TITLE_TIER_LABEL[autoTier]})`
+    : `Title  ${TITLE_TIER_LABEL[mode]}`;
+}
+
+// Carries the "why" behind a degraded title without spending a menu row on it.
+function titleModeTooltip(display: StatusSnapshot["display"], autoTier: TitleTier) {
+  if (!display || typeof display.extrasBudgetPt !== "number") {
+    return `Menu bar space unknown, assuming ${TITLE_TIER_LABEL[autoTier]}. Click to cycle Auto/Full/Single/Icon.`;
+  }
+  const shape = display.hasNotch ? "notched display" : "full-width menu bar";
+  return `${display.extrasBudgetPt}pt of menu bar space (${shape}) fits ${TITLE_TIER_LABEL[autoTier]}. Click to cycle Auto/Full/Single/Icon.`;
+}
+
 function anyProviderStale(snapshot: StatusSnapshot) {
   return snapshot.providers.some((item) => item.meta.stale);
 }
@@ -827,55 +954,36 @@ function usageCardValue(
 // SwiftBar's content guard can skip the menu rebuild and menu bar repaint;
 // never render anything derived from wall-clock age or countdowns here.
 export function renderMenuBar(snapshot: StatusSnapshot = loadDisplayStatusSnapshot(), paths: RuntimePaths = buildPaths(), now: Date = new Date()) {
-  const compact = readCompactMode(paths);
+  const mode = readTitleMode(paths);
   const providers = titleProviders(snapshot);
   const title = providers.map(titleSegment).join(` ${TITLE_SEPARATOR} `);
-  const toggleParams = {
+  const autoTier = pickTitleTier(snapshot.display, providers.length);
+  const tier: TitleTier = mode === "auto" ? autoTier : mode;
+  const modeLine = line(titleModeLabel(mode, autoTier), {
     bash: stableNodeExecutable(),
     param1: appCliPath(paths),
     param2: "menubar",
-    param3: "toggle-compact",
+    param3: "cycle-title-mode",
     terminal: false,
     refresh: true,
     color: TEXT_COLOR,
-    sfimage: compact ? "rectangle.expand.vertical" : "rectangle.compress.vertical",
-  };
+    sfimage: "arrow.triangle.2.circlepath",
+    tooltip: titleModeTooltip(snapshot.display, autoTier),
+  });
   if (!title) {
     return [
       line("Coding Usage Bar  No Usage", { sfimage: "flame.fill", sfcolor: RAW_COLOR }),
       "---",
       line("No provider usage available", { color: MUTED_COLOR }),
-      line(compact ? "Expand" : "Collapse", toggleParams),
+      modeLine,
       line("Refresh now", { refresh: true, color: TEXT_COLOR, sfimage: "arrow.clockwise" }),
     ].join("\n");
   }
 
-  const topState = [...providers].sort((left, right) => (
-    STATE_PRIORITY[left.analysis.state] - STATE_PRIORITY[right.analysis.state]
-  ))[0]?.analysis.state
-    ?? "RAW";
+  const topState = mostUrgentProvider(providers)?.analysis.state ?? "RAW";
   const prefersDark = systemPrefersDark();
-  const titleImage = titleImageValue(providers, prefersDark);
   const lines = [
-    compact
-      ? line("", {
-        sfimage: "flame.fill",
-        sfcolor: STATE_COLOR[topState],
-        dropdown: false,
-        tooltip: title,
-      })
-      : titleImage
-      ? line("", {
-        image: titleImage.image,
-        width: titleImage.width,
-        height: titleImage.height,
-        dropdown: false,
-        tooltip: title,
-      })
-      : line(title, {
-        ...titleIconParams(),
-        dropdown: false,
-      }),
+    titleLine(tier, providers, title, topState, prefersDark),
     "---",
   ];
 
@@ -969,7 +1077,7 @@ export function renderMenuBar(snapshot: StatusSnapshot = loadDisplayStatusSnapsh
   if (visibleIssues.length > 0) {
     lines.push("---");
   }
-  lines.push(line(compact ? "Expand" : "Collapse", toggleParams));
+  lines.push(modeLine);
   lines.push(line("Refresh now", {
     refresh: true,
     color: TEXT_COLOR,

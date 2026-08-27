@@ -67,6 +67,16 @@ Coding Usage Bar 是独立开源项目，也是本工具的唯一事实源。它
 - 菜单栏和 dropdown 的图像**禁止使用 SwiftBar 的 `image=light,dark` 逗号双图语法**：该语法的明暗选择随 SwiftBar 版本漂移（2.1 之前 dropdown 双图有 #399 bug，2.1.x 的修复把三元写反了——亮色菜单反而取 dark 图，白字贴在亮菜单上不可读）。正确做法是渲染时用 `systemPrefersDark()`（读 `defaults read -g AppleInterfaceStyle`，可被 `CODING_USAGE_BAR_APPEARANCE=light|dark` 覆盖）自选变体，只输出**单张**图——单图在所有 SwiftBar 版本上行为一致。外观切换靠下一次 1 分钟渲染跟进。
 - 卡片文字由 install 时 `bakeGlyphAtlases`（一次性 osascript/AppKit，SF monospacedDigit 字形烘焙到 `~/.coding-usage-bar/glyphs/`）提供，运行时渲染进程绝不 spawn osascript/AppKit。字形图集缺失或损坏时，dropdown 必须退化为**零图纯文本行**（ANSI meter + SF Symbol 图标），用 `coding-usage-bar menubar bake-glyphs` 修复。回归测试必须覆盖：卡片模式 dropdown 恰好 1 个 image 项、fallback 模式 0 个 image 项、输出 byte-stable。
 
+## 菜单栏宽度预算（硬约束）
+
+- macOS **不会裁剪**过宽的菜单栏 item，而是把它左推到刘海底下和 app 菜单区，无声消失，任何日志都查不到。实测：刘海屏 13"（1470pt 逻辑宽）刘海右侧只有 645pt 给全机所有菜单栏图标，而六 provider 复合标题自身就 511pt；即使关掉全部第三方图标，上限也只有 404.5pt，仍然装不下。外接无刘海屏可用宽度足够，所以同一份代码在大屏正常、笔记本屏消失。
+- 标题宽度必须来自**测量的预算**，不能拍脑袋：`DisplayGeometry.extrasBudgetPt` 由 producer 侧 `probeDisplayGeometry()` 写入 `status.json`，展示层只读不测。刘海屏取 `NSScreen.screens[0].auxiliaryTopRightArea.width`（**不是 `mainScreen`**，后者跟随 key window，多屏下会读错屏）；无刘海屏取屏宽减去 app 菜单保守预留 600pt。
+- 三档阶梯 `full`(511pt) / `single`(68pt) / `icon`(35pt) 由 `pickTitleTier()` 选择，阈值 900pt / 350pt。**预算缺失时必须降到 `single`，绝不能猜 `full`**：猜窄只损失信息密度，猜宽会丢掉整个 item。
+- **`icon` 是地板不是选项**：`titleLine()` 的每条出口都必须带视觉（image 或 sfimage）。资产缺失、PNG 渲染失败、tier 为空——任何路径都不许产出无视觉的标题行。回归测试必须覆盖这个不变量。
+- 测量只能在 producer 侧：AppKit 探针 ~150ms，daemon 每 300s 一次可忽略；渲染路径基线仅 330-400ms，绝不能在这里 spawn osascript/AppKit。换屏最多一个采集周期跟进，等不及走 dropdown 的 `Title` 行手动切档。
+- **不要引入 AX 方案测"别人占了多少"**：实测遍历全部 app 的 `AXExtrasMenuBar` 要 4.85s，只查单个 app 也要 1.54s，还需要辅助功能权限（SwiftBar 派生进程未必有）。已否决，勿重查。
+- 手动覆盖存于 `~/.coding-usage-bar/compact-mode`（沿用旧文件名），内容为 `full|single|icon`，文件不存在即 `auto`；空文件是升级前的 compact 标记，读作 `icon`，必须保持这个向后兼容。
+
 ## Provider usage 解析原则
 
 - 每个 provider 的 collector 必须**完整读取 API 返回的 usage 信号**。不能只解析一类信号就把另一种信号当 0 处理。

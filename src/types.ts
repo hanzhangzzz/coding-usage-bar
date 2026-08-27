@@ -117,11 +117,30 @@ export interface StatusIssue {
   message: string;
 }
 
+// Menu bar geometry measured by the producer. The menu bar is the scarcest
+// real estate on the machine and a title wider than the space left over is not
+// clipped by macOS -- it is pushed left, under the notch and into the app menu
+// area, and silently disappears. The display layer picks a title tier from
+// this budget; per the producer/display split it never measures the screen.
+export interface DisplayGeometry {
+  // Logical width of the menu bar screen (NSScreen.screens[0]).
+  screenWidthPt: number;
+  hasNotch: boolean;
+  // Points actually available to menu bar extras. On a notched display that is
+  // the whole right-of-notch region; otherwise the screen width minus a
+  // conservative reserve for the frontmost app's own menus.
+  extrasBudgetPt: number;
+  measuredAt: string;
+}
+
 export interface StatusSnapshot {
   generatedAt: string;
   profile: BurnProfile;
   providers: ProviderStatus[];
   issues: StatusIssue[];
+  // Absent on snapshots written before display probing, on non-macOS hosts,
+  // and whenever the probe fails. Consumers must degrade, never assume.
+  display?: DisplayGeometry | null;
 }
 
 export interface BurnConfig {
