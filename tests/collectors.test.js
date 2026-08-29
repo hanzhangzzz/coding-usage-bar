@@ -616,6 +616,28 @@ test("usageFromGlmQuota identifies windows by unit/number shape, not reset order
   assert.equal(usage.windows[1].usedPercent, 9);
 });
 
+test("usageFromGlmQuota parses CREDIT_LIMIT windows for credit-based Coding Plans", () => {
+  // Regression: Zhipu switched Coding Plan quota reporting from TOKENS_LIMIT
+  // to CREDIT_LIMIT (observed live 2026-08-29 on a Pro plan). The shapes match
+  // the old token windows (unit 3/number 5 = 5h, unit 6/number 1 = week), so
+  // credit-based plans must parse instead of failing with GLM_USAGE_MISSING.
+  const usage = usageFromGlmQuota({
+    success: true,
+    data: {
+      level: "pro",
+      limits: [
+        { type: "CREDIT_LIMIT", unit: 3, number: 5, usage: 12000, currentValue: 3974, remaining: 8025, percentage: 33, nextResetTime: 1788029747676 },
+        { type: "CREDIT_LIMIT", unit: 6, number: 1, usage: 60000, currentValue: 3974, remaining: 56025, percentage: 6, nextResetTime: 1788615889998 },
+      ],
+    },
+  }, { source: "test" });
+  assert.ok(usage);
+  assert.equal(usage.windows[0].name, "five_hour");
+  assert.equal(usage.windows[0].usedPercent, 33);
+  assert.equal(usage.windows[1].name, "seven_day");
+  assert.equal(usage.windows[1].usedPercent, 6);
+});
+
 test("usageFromGlmQuota still returns null when token windows are missing", () => {
   const usage = usageFromGlmQuota({
     success: true,
