@@ -97,37 +97,77 @@ export function usageFromCodexRateLimits(
   };
 }
 
-function latestCandidateFromFile(file: string): CodexCandidate | null {
+const DEFAULT_TAIL_CHUNK_BYTES = 1024 * 1024;
+
+function candidateFromLine(line: string, file: string, fallbackMs: number): CodexCandidate | null {
+  if (!line || !line.includes("rate_limits")) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(line) as Record<string, unknown>;
+    const payload = parsed.payload as Record<string, unknown> | undefined;
+    const rateLimits = payload?.rate_limits ?? parsed.rate_limits;
+    const observedMs = parseObservedMs(parsed.timestamp ?? parsed.ts, fallbackMs);
+    const usage = usageFromCodexRateLimits(rateLimits, {
+      source: file,
+      observedAt: new Date(observedMs).toISOString(),
+    });
+    return usage ? { usage, observedMs } : null;
+  } catch {
+    return null;
+  }
+}
+
+// Session rollouts of a long-lived Codex session can exceed V8's max string
+// length (~512 MiB); readFileSync(file, "utf8") then throws and the newest
+// usage silently disappears. Read the file backwards in bounded chunks and stop
+// at the first complete line that carries rate_limits.
+function latestCandidateFromFile(file: string, chunkBytes: number): CodexCandidate | null {
   const stat = fs.statSync(file);
-  const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
+  const fd = fs.openSync(file, "r");
+  try {
+    let position = stat.size;
+    let carry = Buffer.alloc(0);
+    while (position > 0) {
+      const readSize = Math.min(chunkBytes, position);
+      position -= readSize;
+      const chunk = Buffer.alloc(readSize);
+      fs.readSync(fd, chunk, 0, readSize, position);
+      const combined = carry.length > 0 ? Buffer.concat([chunk, carry]) : chunk;
 
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    const line = lines[i]?.trim();
-    if (!line || !line.includes("rate_limits")) {
-      continue;
-    }
-
-    try {
-      const parsed = JSON.parse(line) as Record<string, unknown>;
-      const payload = parsed.payload as Record<string, unknown> | undefined;
-      const rateLimits = payload?.rate_limits ?? parsed.rate_limits;
-      const observedMs = parseObservedMs(parsed.timestamp ?? parsed.ts, stat.mtimeMs);
-      const usage = usageFromCodexRateLimits(rateLimits, {
-        source: file,
-        observedAt: new Date(observedMs).toISOString(),
-      });
-      if (usage) {
-        return { usage, observedMs };
+      let lineStart = 0;
+      if (position > 0) {
+        const newline = combined.indexOf(0x0a);
+        if (newline === -1) {
+          carry = combined;
+          continue;
+        }
+        carry = combined.subarray(0, newline);
+        lineStart = newline + 1;
+      } else {
+        carry = Buffer.alloc(0);
       }
-    } catch {
-      continue;
+
+      const lines = combined.subarray(lineStart).toString("utf8").split(/\r?\n/);
+      for (let i = lines.length - 1; i >= 0; i -= 1) {
+        const candidate = candidateFromLine(lines[i]?.trim() ?? "", file, stat.mtimeMs);
+        if (candidate) {
+          return candidate;
+        }
+      }
     }
+  } finally {
+    fs.closeSync(fd);
   }
 
   return null;
 }
 
-export function collectCodexUsage(codexHome = path.join(process.env.HOME ?? "", ".codex")) {
+export function collectCodexUsage(
+  codexHome = path.join(process.env.HOME ?? "", ".codex"),
+  options: { tailChunkBytes?: number } = {},
+) {
+  const chunkBytes = options.tailChunkBytes ?? DEFAULT_TAIL_CHUNK_BYTES;
   if (!isDir(codexHome)) {
     throw new Error(`Codex usage unavailable: ${codexHome} does not exist`);
   }
@@ -142,7 +182,7 @@ export function collectCodexUsage(codexHome = path.join(process.env.HOME ?? "", 
       break;
     }
     try {
-      const candidate = latestCandidateFromFile(file);
+      const candidate = latestCandidateFromFile(file, chunkBytes);
       if (candidate && (!latest || candidate.observedMs > latest.observedMs)) {
         latest = candidate;
       }
