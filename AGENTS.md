@@ -46,6 +46,7 @@ Coding Usage Bar 是独立开源项目，也是本工具的唯一事实源。它
 - 如果发现 stale，先检查 producer 是否生成了新的 `status.json`，以及 collector 是否能从 session 数据源读到最新 `rate_limits`；不要用“让展示层自己采集”绕过问题。
 - Codex collector 属于 producer 侧，可以优化扫描范围和排序。它应只扫描 `~/.codex/sessions` 与 `~/.codex/archived_sessions`，不要递归整个 `~/.codex`，避免读到 `.tmp`、插件 fixture 或其他非 session JSONL。
 - 必须保留回归测试覆盖这个边界：缺少 `status.json` 时，display 入口不采集原始源；非 session JSONL 不会被 Codex collector 当作 usage 来源。
+- Codex session rollout 是追加写入的长文件，单个长会话可超过 V8 字符串上限（约 512 MiB，`ERR_STRING_TOO_LONG`）。collector 禁止 `readFileSync(file, "utf8")` 整文件读入：必须从文件尾部按固定块倒读，命中第一条完整的 `rate_limits` 行即停。整读会在文件跨过上限后静默失败（catch 吞掉），状态会永久冻结在上限前最后一条样本，且每分钟白读几百 MB。
 
 ## 燃烧策略
 
