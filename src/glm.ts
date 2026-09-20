@@ -55,21 +55,31 @@ function resetTimeIso(value: number | undefined): string | null {
 // usage (same proto-style field omission as Kimi's zero `used`). The zero
 // percentage is a real signal and must not be dropped; a missing reset time
 // falls back to `observedAt`, which renders as "reset due".
-function pickTokenWindows(limits: GlmLimit[]): { five: GlmLimit; seven: GlmLimit } | null {
-  const tokenLimits = limits.filter((limit) => limit.type === "TOKENS_LIMIT");
-  if (tokenLimits.length < 2) {
-    return null;
-  }
-  let five = tokenLimits.find((limit) => limit.unit === 3 && limit.number === 5) ?? null;
-  let seven = tokenLimits.find((limit) => limit.unit === 6 && limit.number === 1) ?? null;
+function pickTokenWindowsOfType(limits: GlmLimit[]): { five: GlmLimit; seven: GlmLimit } | null {
+  let five = limits.find((limit) => limit.unit === 3 && limit.number === 5) ?? null;
+  let seven = limits.find((limit) => limit.unit === 6 && limit.number === 1) ?? null;
   if (!five || !seven) {
-    const rest = tokenLimits
+    const rest = limits
       .filter((limit) => limit !== five && limit !== seven)
       .sort((a, b) => (a.nextResetTime ?? 0) - (b.nextResetTime ?? 0));
     five = five ?? rest.shift() ?? null;
     seven = seven ?? rest.shift() ?? null;
   }
   return five && seven ? { five, seven } : null;
+}
+
+function pickTokenWindows(limits: GlmLimit[]): { five: GlmLimit; seven: GlmLimit } | null {
+  // Zhipu migrated Coding Plan quota reporting from TOKENS_LIMIT (token
+  // counts) to CREDIT_LIMIT (credit counts, observed live 2026-08-29) with the
+  // same unit/number window shapes. Prefer the token signal when both exist;
+  // fall back to credits so credit-based plans are not dropped as unusable.
+  for (const type of ["TOKENS_LIMIT", "CREDIT_LIMIT"]) {
+    const picked = pickTokenWindowsOfType(limits.filter((limit) => limit.type === type));
+    if (picked) {
+      return picked;
+    }
+  }
+  return null;
 }
 
 export function usageFromGlmQuota(
