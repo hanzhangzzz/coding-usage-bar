@@ -689,6 +689,23 @@ test("usageFromGlmQuota parses CREDIT_LIMIT windows for credit-based Coding Plan
   assert.equal(usage.windows[1].usedPercent, 6);
 });
 
+test("usageFromGlmQuota falls back to complete CREDIT_LIMIT windows when token data is incomplete", () => {
+  const usage = usageFromGlmQuota({
+    success: true,
+    data: {
+      level: "pro",
+      limits: [
+        { type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 12 },
+        { type: "CREDIT_LIMIT", unit: 3, number: 5, percentage: 33 },
+        { type: "CREDIT_LIMIT", unit: 6, number: 1, percentage: 6 },
+      ],
+    },
+  }, { source: "test", observedAt: "2026-09-20T00:00:00.000Z" });
+  assert.ok(usage);
+  assert.equal(usage.windows[0].usedPercent, 33);
+  assert.equal(usage.windows[1].usedPercent, 6);
+});
+
 test("usageFromGlmQuota still returns null when token windows are missing", () => {
   const usage = usageFromGlmQuota({
     success: true,

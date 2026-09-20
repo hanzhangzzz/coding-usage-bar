@@ -56,6 +56,9 @@ function resetTimeIso(value: number | undefined): string | null {
 // percentage is a real signal and must not be dropped; a missing reset time
 // falls back to `observedAt`, which renders as "reset due".
 function pickTokenWindowsOfType(limits: GlmLimit[]): { five: GlmLimit; seven: GlmLimit } | null {
+  if (limits.length < 2) {
+    return null;
+  }
   let five = limits.find((limit) => limit.unit === 3 && limit.number === 5) ?? null;
   let seven = limits.find((limit) => limit.unit === 6 && limit.number === 1) ?? null;
   if (!five || !seven) {
