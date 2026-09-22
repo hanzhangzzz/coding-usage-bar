@@ -50,6 +50,7 @@ function providerLabel(provider: string) {
   if (provider === "deepseek") return "DeepSeek";
   if (provider === "minimax") return "MiniMax";
   if (provider === "kimi") return "Kimi";
+  if (provider === "qwen") return "Qwen";
   return "Codex";
 }
 

@@ -6,9 +6,22 @@
 
 ![Coding Usage Bar 在 macOS 菜单栏展示多个 AI 编程 Provider 的套餐用量](docs/assets/hero.png)
 
-Coding Usage Bar 同时支持 Claude Code、OpenAI Codex、GLM（智谱 AI）、DeepSeek、MiniMax 和 Kimi（Moonshot AI）。它不只展示百分比，还会结合短周期和周额度判断当前节奏是偏慢、正常、偏快，还是已经接近限额。
+Coding Usage Bar 同时支持 Claude Code、OpenAI Codex、GLM（智谱 AI）、DeepSeek、MiniMax、Kimi（Moonshot AI）和 Qwen（阿里云百炼）。它不只展示百分比，还会结合短周期和周额度判断当前节奏是偏慢、正常、偏快，还是已经接近限额。
 
-Claude Code 与 Codex 的数据直接读取它们在本机产生的文件，不需要额外登录，也不会上传使用记录。GLM、DeepSeek 和 MiniMax 的 API Key 只保存在 `~/.coding-usage-bar/config.json`，并直接请求对应 Provider 的额度接口。Kimi 的 Key 优先读 `~/.coding-usage-bar/config.json`，未配置时回退到 `~/.config/claude-lanes/config.env` 中指向 kimi.com 的 lane。
+Claude Code 与 Codex 的数据直接读取它们在本机产生的文件，不需要额外登录，也不会上传使用记录。GLM、DeepSeek 和 MiniMax 的 API Key 只保存在 `~/.coding-usage-bar/config.json`，并直接请求对应 Provider 的额度接口。Kimi 的 Key 优先读 `~/.coding-usage-bar/config.json`，未配置时回退到 `~/.config/claude-lanes/config.env` 中指向 kimi.com 的 lane。Qwen 不保存任何凭据：阿里云没有 API Key 可达的额度接口，用量通过持有控制台登录态的官方百炼 CLI（`bl`）读取，需先执行 `npm install -g bailian-cli` 和 `bl auth login --console`。
+
+## Qwen 试用（尚未发布）
+
+Qwen collector 位于 PR #5，npm 0.5.1 尚不包含；仍需要有订阅用户对照控制台验证，确认前不合入。
+
+已安装官方百炼 CLI 并执行 `bl auth login --console` 后，只查询 Qwen：
+
+```sh
+npx -y "github:hanzhangzzz/coding-usage-bar#task/qwen-provider" qwen-check
+```
+
+此入口只调用 `bl` 并输出归一化 JSON，不读取本工具配置、不刷新其他 provider、不写 Coding Usage Bar 状态文件、不安装运行时，也不改 SwiftBar/launchd。百炼 CLI 自行管理登录态。请对照控制台的 5h/周用量百分比；上游若缺失重置时间，输出采用观察时间兜底，不是已验证的重置计划。分享输出前请检查并脱敏。
+
 
 ## 真实 SwiftBar 菜单
 
@@ -68,4 +81,4 @@ npm pack
 
 [MIT](LICENSE)
 
-各 Provider 名称与商标归其权利人所有。本项目独立开发，与 Anthropic、OpenAI、智谱 AI、DeepSeek、MiniMax、Moonshot AI 无隶属或背书关系。Provider 标识仅用于识别，不适用项目 MIT License，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+各 Provider 名称与商标归其权利人所有。本项目独立开发，与 Anthropic、OpenAI、智谱 AI、DeepSeek、MiniMax、Moonshot AI、阿里云无隶属或背书关系。Provider 标识仅用于识别，不适用项目 MIT License，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

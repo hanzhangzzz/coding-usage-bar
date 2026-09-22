@@ -11,6 +11,7 @@ import { buildPaths } from "./paths.js";
 import { bakeGlyphAtlases } from "./glyphs.js";
 import { maybePromptForStar } from "./star.js";
 import { updateStatusSnapshotUsage } from "./status.js";
+import { collectQwenUsage } from "./qwen.js";
 
 function hasFlag(args: string[], flag: string) {
   return args.includes(flag);
@@ -24,6 +25,7 @@ Usage:
   coding-usage-bar uninstall [--dry-run]
   coding-usage-bar doctor [--dry-run] [--fix]
   coding-usage-bar status [--fixtures] [--json] [--refresh]
+  coding-usage-bar qwen-check
   coding-usage-bar menubar render
   coding-usage-bar menubar install [--dry-run]
   coding-usage-bar menubar uninstall [--dry-run]
@@ -81,6 +83,13 @@ async function main() {
         }
         process.exitCode = 1;
       }
+      return;
+    }
+
+    if (command === "qwen-check") {
+      // Trial path: query only bl; do not read config or write installed state.
+      const { provider, planType, observedAt, windows } = await collectQwenUsage();
+      console.log(JSON.stringify({ provider, planType, observedAt, windows }, null, 2));
       return;
     }
 

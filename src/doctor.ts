@@ -5,6 +5,7 @@ import { collectCodexUsage } from "./codex.js";
 import { claudeStatusLineHasIngest, getClaudeStatusLineCommand, readClaudeSettings } from "./claude.js";
 import { isDir, isFile } from "./fs-util.js";
 import { resolveKimiConfig } from "./kimi.js";
+import { resolveBlBinary } from "./qwen.js";
 import { buildPaths, providerLatestPath } from "./paths.js";
 import { notificationBackend } from "./notifier.js";
 import {
@@ -233,6 +234,34 @@ export function runDoctor(options: { dryRun?: boolean } = {}): DoctorCheck[] {
   } else {
     checks.push({
       name: "Kimi",
+      ok: true,
+      message: "disabled by config",
+    });
+  }
+
+  if (monitored.has("qwen")) {
+    const blBinary = resolveBlBinary(config.qwen);
+    checks.push({
+      name: "Qwen Bailian CLI",
+      ok: Boolean(blBinary),
+      message: blBinary
+        ? `found ${blBinary} (plan: ${config.qwen?.plan ?? "auto"})`
+        : "bl not found; npm install -g bailian-cli, then bl auth login --console",
+    });
+
+    const qwenLatest = providerLatestPath(paths, "qwen");
+    checks.push({
+      name: "Qwen usage cache",
+      ok: !blBinary || isFile(qwenLatest),
+      message: isFile(qwenLatest)
+        ? `found ${qwenLatest}`
+        : blBinary
+          ? `missing ${qwenLatest}; run coding-usage-bar daemon --once to collect`
+          : "skipped (bl not installed)",
+    });
+  } else {
+    checks.push({
+      name: "Qwen",
       ok: true,
       message: "disabled by config",
     });

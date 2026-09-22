@@ -31,6 +31,7 @@ const PROVIDER_ICON_ASSET: Record<string, string> = {
   deepseek: "provider-deepseek.png",
   minimax: "provider-minimax.png",
   kimi: "provider-kimi.png",
+  qwen: "provider-qwen.png",
 };
 
 const PROVIDER_ICON_DARK_ASSET: Record<string, string> = {
@@ -44,6 +45,7 @@ const PROVIDER_ICON_FALLBACK: Record<string, string> = {
   deepseek: "bubble.left.and.bubble.right",
   minimax: "waveform.path.ecg",
   kimi: "k.square.fill",
+  qwen: "q.square.fill",
 };
 
 const TITLE_ICON_ASSET = "provider-marks.png";
@@ -72,7 +74,7 @@ const STATE_PRIORITY: Record<BurnState, number> = {
 const TEXT_COLOR = "#111827,#F9FAFB";
 const MUTED_COLOR = "#6B7280,#A1A1AA";
 const ROW_FONT = "Menlo";
-const TITLE_PROVIDER_ORDER = ["codex", "claude", "glm", "deepseek", "minimax", "kimi"];
+const TITLE_PROVIDER_ORDER = ["codex", "claude", "glm", "deepseek", "minimax", "kimi", "qwen"];
 const TITLE_SEPARATOR = "│";
 const METER_WIDTH = 12;
 const ASSET_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "assets");
