@@ -162,6 +162,17 @@ If `kimi.apiKey` is empty, Coding Usage Bar falls back to the lane whose `CONFIG
 
 ## Qwen (Alibaba Bailian Token Plan / Coding Plan)
 
+> **Experimental, not yet in npm 0.5.1.** A subscribed account has not been validated. PR #5 stays unmerged until the reported percentages are checked against a real account.
+
+After installing the official Bailian CLI and completing `bl auth login --console`, try only the Qwen collector:
+
+```sh
+npx -y "github:hanzhangzzz/coding-usage-bar#task/qwen-provider" qwen-check
+```
+
+`qwen-check` finds `bl` on PATH (or common install prefixes), auto-detects Token Plan / Coding Plan, and prints normalized JSON. It does not read this tool's config, refresh other providers, write Coding Usage Bar state, install a runtime, or change SwiftBar/launchd. Bailian CLI remains responsible for its own login session. Compare each returned `usedPercent` with the console; if the upstream omits reset times, the parser uses observation time as a fallback, not a verified reset schedule. Review and redact output before posting it to Issue #2.
+
+
 Alibaba exposes no API-key quota endpoint: a `sk-`/`sk-sp-` key runs inference, but quota lives behind the Bailian console session. Coding Usage Bar therefore reads Qwen usage through the official Bailian CLI (`bl`), which owns that session — the same way Codex and Claude usage is read from files those official tools already produce. No Alibaba credential is ever stored or handled by Coding Usage Bar.
 
 ```bash
