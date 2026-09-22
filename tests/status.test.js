@@ -204,3 +204,41 @@ test("daemon commit preserves newer Claude cache over older collected usage", ()
   assert.equal(snapshot.providers[0].usage.windows[0].usedPercent, 101);
   assert.equal(loadStatusSnapshot(paths).providers[0].usage.windows[0].usedPercent, 101);
 });
+
+const displayGeometry = {
+  screenWidthPt: 1470,
+  hasNotch: true,
+  extrasBudgetPt: 645,
+  measuredAt: "2026-05-08T00:00:00.000Z",
+};
+
+test("the producer records the measured menu bar budget in status.json", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-display-"));
+  const paths = buildPaths(home);
+  commitCollectedStatusSnapshot([usage], [], { paths, display: displayGeometry });
+  assert.deepEqual(loadStatusSnapshot(paths).display, displayGeometry);
+});
+
+test("a failed display probe keeps the previous budget instead of blanking it", () => {
+  // One headless or locked-screen collection must not demote the title tier
+  // for the next five minutes.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-display-"));
+  const paths = buildPaths(home);
+  commitCollectedStatusSnapshot([usage], [], { paths, display: displayGeometry });
+  commitCollectedStatusSnapshot([usage], [], { paths, display: null });
+  assert.deepEqual(loadStatusSnapshot(paths).display, displayGeometry);
+});
+
+test("Claude status line ingest preserves the measured menu bar budget", () => {
+  // This path runs on every Claude Code prompt. Dropping the measurement here
+  // would silently narrow the menu bar title while the user types.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-display-"));
+  const paths = buildPaths(home);
+  commitCollectedStatusSnapshot([usage], [], { paths, display: displayGeometry });
+
+  updateStatusSnapshotUsage(claudeUsage(31, "2026-08-21T09:20:00.000Z"), paths);
+
+  const snapshot = loadStatusSnapshot(paths);
+  assert.deepEqual(snapshot.display, displayGeometry);
+  assert.ok(snapshot.providers.some((provider) => provider.usage.provider === "claude"));
+});

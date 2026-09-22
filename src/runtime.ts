@@ -6,12 +6,13 @@ import { collectCodexUsage } from "./codex.js";
 import { readJsonFile } from "./fs-util.js";
 import { collectGlmUsage } from "./glm.js";
 import { collectDeepseekUsage } from "./deepseek.js";
+import { probeDisplayGeometry } from "./display-probe.js";
 import { collectKimiUsage, resolveKimiConfig } from "./kimi.js";
 import { collectMinimaxUsage } from "./minimax.js";
 import { collectQwenUsage, resolveBlBinary } from "./qwen.js";
 import { buildPaths } from "./paths.js";
 import { loadLatestUsage, loadSamples, saveUsage } from "./store.js";
-import { BurnAnalysis, BurnProfile, ProviderUsage, RuntimePaths, StatusIssue, StatusSnapshot } from "./types.js";
+import { BurnAnalysis, BurnProfile, DisplayGeometry, ProviderUsage, RuntimePaths, StatusIssue, StatusSnapshot } from "./types.js";
 import {
   createStatusSnapshot,
   loadStatusSnapshot,
@@ -309,6 +310,8 @@ export function commitCollectedStatusSnapshot(
     profile?: BurnProfile;
     generatedAt?: Date;
     fixtureSamples?: Map<string, ProviderUsage[]>;
+    // Test seam: pass null to skip the AppKit probe entirely.
+    display?: DisplayGeometry | null;
   } = {},
 ) {
   const paths = options.paths ?? buildPaths();
@@ -320,6 +323,10 @@ export function commitCollectedStatusSnapshot(
     fixtureSamples: options.fixtureSamples,
     issues,
   });
+  // Measured outside the lock: it spawns a process and the lock guards a file
+  // write. A failed probe keeps the previous reading rather than blanking it,
+  // so one bad launchd context cannot demote the title tier.
+  const display = options.display === undefined ? probeDisplayGeometry(now) : options.display;
   return withStatusSnapshotLock(paths, () => {
     const existing = loadStatusSnapshot(paths);
     const cached = reconcileLatestUsages(usages, paths);
@@ -332,6 +339,7 @@ export function commitCollectedStatusSnapshot(
         snapshot = replaceStatusSnapshotUsage(snapshot, provider.usage, now);
       }
     }
+    snapshot = { ...snapshot, display: display ?? existing?.display ?? null };
     saveStatusSnapshot(snapshot, paths);
     return snapshot;
   });

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { renderMenuBar, swiftBarStatusItemVisibilityKeys, readCompactMode, toggleCompactMode, resetGlyphSetCache, verifyMenuBarSetup } from "../dist/menubar.js";
+import { renderMenuBar, swiftBarStatusItemVisibilityKeys, readTitleMode, writeTitleMode, cycleTitleMode, pickTitleTier, resetGlyphSetCache, verifyMenuBarSetup } from "../dist/menubar.js";
 import { buildPaths } from "../dist/paths.js";
 import { encodePNG } from "../dist/png.js";
 import { GLYPH_STYLES } from "../dist/glyphs.js";
@@ -117,6 +117,14 @@ const claudeProvider = {
 const snapshot = {
   generatedAt: "2026-05-08T00:00:00.000Z",
   profile: "low",
+  // Wide external display: most assertions in this file describe the full
+  // tier's composition. Tier selection itself has its own tests below.
+  display: {
+    screenWidthPt: 2560,
+    hasNotch: false,
+    extrasBudgetPt: 1960,
+    measuredAt: "2026-05-08T00:00:00.000Z",
+  },
   providers: [
     claudeProvider,
     codexProvider,
@@ -261,47 +269,152 @@ test("swiftBarStatusItemVisibilityKeys finds hidden status item cache keys", () 
   ]);
 });
 
-test("toggleCompactMode creates and removes compact mode file", () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-menubar-"));
-  const paths = buildPaths(home);
-  const compactFile = path.join(paths.stateDir, "compact-mode");
-  assert.equal(readCompactMode(paths), false);
-
-  const firstToggle = toggleCompactMode(paths);
-  assert.equal(firstToggle, true);
-  assert.equal(readCompactMode(paths), true);
-  assert.ok(fs.existsSync(compactFile));
-
-  const secondToggle = toggleCompactMode(paths);
-  assert.equal(secondToggle, false);
-  assert.equal(readCompactMode(paths), false);
-  assert.ok(!fs.existsSync(compactFile));
-});
-
-test("renderMenuBar shows Collapse toggle in full mode", () => {
-  const output = renderMenuBar(snapshot, freshPaths());
-  assert.match(output, /Collapse \| bash=.* param1=.* param2=menubar param3=toggle-compact terminal=false refresh=true/);
-  assert.doesNotMatch(output, /Expand \| bash=.* param1=.* param2=menubar param3=toggle-compact/);
-});
-
-test("renderMenuBar shows Expand toggle in compact mode", () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-menubar-"));
-  const paths = buildPaths(home);
-  // Enable compact mode
-  toggleCompactMode(paths);
-  try {
-    assert.equal(readCompactMode(paths), true);
-    const output = renderMenuBar(snapshot, paths);
-    assert.match(output, /Expand \| bash=.* param1=.* param2=menubar param3=toggle-compact terminal=false refresh=true/);
-    assert.doesNotMatch(output, /Collapse \| bash=.* param1=.* param2=menubar param3=toggle-compact/);
-    // Compact title should have sfimage=flame.fill without image= or wide text
-    const titleLine = output.split("\n")[0];
-    assert.match(titleLine, /sfimage=flame\.fill/);
-    assert.doesNotMatch(titleLine, / image=/);
-  } finally {
-    // Restore full mode
-    toggleCompactMode(paths);
+// A menu bar title wider than the space left over is not clipped by macOS --
+// it is pushed under the notch and vanishes. These tests pin the width ladder
+// that keeps that from happening.
+function titleImageWidthPt(output) {
+  const titleLine = output.split("\n")[0];
+  const encoded = /(?<!sf)image=([A-Za-z0-9+/=]+)/.exec(titleLine);
+  if (!encoded) {
+    return null;
   }
+  // Title images render at 2x for Retina; report logical points.
+  return pngInfoFromBase64(encoded[1]).width / 2;
+}
+
+test("pickTitleTier maps a measured menu bar budget to a title width", () => {
+  const at = { screenWidthPt: 0, hasNotch: false, measuredAt: "x" };
+  assert.equal(pickTitleTier({ ...at, extrasBudgetPt: 1960 }, 6), "full");
+  assert.equal(pickTitleTier({ ...at, extrasBudgetPt: 900 }, 6), "full");
+  assert.equal(pickTitleTier({ ...at, extrasBudgetPt: 899 }, 6), "single");
+  // The reference notched 13": 645pt right of the notch cannot hold the 511pt
+  // composite once the system's own ~240pt of extras are there.
+  assert.equal(pickTitleTier({ ...at, extrasBudgetPt: 645, hasNotch: true }, 6), "single");
+  assert.equal(pickTitleTier({ ...at, extrasBudgetPt: 350 }, 6), "single");
+  assert.equal(pickTitleTier({ ...at, extrasBudgetPt: 349 }, 6), "icon");
+  assert.equal(pickTitleTier({ ...at, extrasBudgetPt: 0 }, 6), "icon");
+  // No providers means nothing to draw wide.
+  assert.equal(pickTitleTier({ ...at, extrasBudgetPt: 1960 }, 0), "icon");
+});
+
+test("pickTitleTier falls back to the narrow tier when the budget is unknown", () => {
+  // Guessing `single` wrong costs detail; guessing `full` wrong costs the
+  // whole menu bar item, so an unmeasured display must never pick full.
+  assert.equal(pickTitleTier(undefined, 6), "single");
+  assert.equal(pickTitleTier(null, 6), "single");
+  assert.equal(pickTitleTier({ screenWidthPt: 1470, hasNotch: true, measuredAt: "x" }, 6), "single");
+  assert.equal(pickTitleTier({ extrasBudgetPt: Number.NaN, screenWidthPt: 1, hasNotch: true, measuredAt: "x" }, 6), "single");
+});
+
+test("renderMenuBar narrows the title to one provider on a notched display", () => {
+  const notched = {
+    ...snapshot,
+    display: { screenWidthPt: 1470, hasNotch: true, extrasBudgetPt: 645, measuredAt: "x" },
+  };
+  const wide = renderMenuBar(snapshot, freshPaths());
+  const narrow = renderMenuBar(notched, freshPaths());
+
+  const widePt = titleImageWidthPt(wide);
+  const narrowPt = titleImageWidthPt(narrow);
+  // One segment is ~68pt; the fixture's two providers make the full tier
+  // roughly twice that. The real six-provider title is 493pt.
+  assert.ok(narrowPt < 100, `single tier must fit a notched bar, got ${narrowPt}pt`);
+  assert.ok(widePt > narrowPt * 1.8, `full tier should show every provider, got ${widePt}pt vs ${narrowPt}pt`);
+
+  // The most urgent provider wins the one slot: Claude is OVER_BURN, Codex is
+  // UNDER_BURN. The tooltip still carries every provider.
+  assert.match(narrow, /tooltip=5H:0%,7D:35%\\ │\\ 5H:31%,7D:69%/);
+  assert.match(narrow, /Title  Auto \(Single\)/);
+  // SwiftBar param values escape spaces, so the tooltip arrives backslashed.
+  assert.match(narrow, /tooltip=645pt\\ of\\ menu\\ bar\\ space\\ \(notched\\ display\)/);
+  // Dropdown content is identical in every tier.
+  assert.match(narrow, /Codex  Low/);
+  assert.match(narrow, /Claude  Fast/);
+});
+
+test("renderMenuBar keeps a visible title when no width is left at all", () => {
+  const cramped = {
+    ...snapshot,
+    display: { screenWidthPt: 900, hasNotch: true, extrasBudgetPt: 120, measuredAt: "x" },
+  };
+  const output = renderMenuBar(cramped, freshPaths());
+  const titleLine = output.split("\n")[0];
+  // The floor of the ladder: an SF Symbol always renders, and it must never
+  // degrade to an item with no visual at all -- invisible reads as broken.
+  assert.match(titleLine, /sfimage=flame\.fill/);
+  assert.doesNotMatch(titleLine, /(?<!sf)image=/);
+  assert.match(titleLine, /tooltip=/);
+  assert.match(output, /Title  Auto \(Icon\)/);
+});
+
+test("renderMenuBar never emits a title line without a visual", () => {
+  const budgets = [1960, 645, 120, undefined];
+  for (const extrasBudgetPt of budgets) {
+    const display = extrasBudgetPt === undefined
+      ? null
+      : { screenWidthPt: 1470, hasNotch: true, extrasBudgetPt, measuredAt: "x" };
+    const titleLine = renderMenuBar({ ...snapshot, display }, freshPaths()).split("\n")[0];
+    assert.match(
+      titleLine,
+      /(?<!sf)image=[A-Za-z0-9+/=]{80,}|sfimage=[a-z.]+/,
+      `budget ${extrasBudgetPt} produced a title with no visual: ${titleLine}`,
+    );
+  }
+});
+
+test("cycleTitleMode walks auto to full to single to icon and back", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-menubar-"));
+  const paths = buildPaths(home);
+  assert.equal(readTitleMode(paths), "auto");
+  assert.equal(cycleTitleMode(paths), "full");
+  assert.equal(cycleTitleMode(paths), "single");
+  assert.equal(cycleTitleMode(paths), "icon");
+  assert.equal(cycleTitleMode(paths), "auto");
+  assert.equal(readTitleMode(paths), "auto");
+});
+
+test("readTitleMode reads a pre-tier compact marker as the icon tier", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-menubar-"));
+  const paths = buildPaths(home);
+  fs.mkdirSync(paths.stateDir, { recursive: true });
+  // Installs before the width ladder wrote an empty file to mean "compact".
+  fs.writeFileSync(path.join(paths.stateDir, "compact-mode"), "");
+  assert.equal(readTitleMode(paths), "icon");
+
+  const titleLine = renderMenuBar(snapshot, paths).split("\n")[0];
+  assert.match(titleLine, /sfimage=flame\.fill/);
+});
+
+test("a manual title mode overrides the measured budget in both directions", () => {
+  const notched = {
+    ...snapshot,
+    display: { screenWidthPt: 1470, hasNotch: true, extrasBudgetPt: 645, measuredAt: "x" },
+  };
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-menubar-"));
+  const paths = buildPaths(home);
+
+  writeTitleMode("full", paths);
+  const forcedWide = renderMenuBar(notched, paths);
+  const autoWidth = titleImageWidthPt(renderMenuBar(notched, freshPaths()));
+  assert.ok(
+    titleImageWidthPt(forcedWide) > autoWidth,
+    "manual full must win over a narrow budget",
+  );
+  assert.match(forcedWide, /Title  Full/);
+
+  writeTitleMode("icon", paths);
+  const forcedIcon = renderMenuBar(snapshot, paths);
+  assert.match(forcedIcon.split("\n")[0], /sfimage=flame\.fill/);
+  assert.match(forcedIcon, /Title  Icon/);
+
+  writeTitleMode("auto", paths);
+  assert.match(renderMenuBar(notched, paths), /Title  Auto \(Single\)/);
+});
+
+test("the title mode row cycles through the CLI and stays a plain text row", () => {
+  const output = renderMenuBar(snapshot, freshPaths());
+  assert.match(output, /Title  Auto \(Full\) \| bash=.* param2=menubar param3=cycle-title-mode terminal=false refresh=true/);
+  assert.doesNotMatch(output, /param3=toggle-compact/);
 });
 
 const blockedKimiProvider = {

@@ -155,6 +155,57 @@ test("collectCodexUsage ignores non-session jsonl files", () => {
   assert.equal(usage.windows[0].usedPercent, 12);
 });
 
+function codexRateLimitLine(timestamp, usedPercent, extra = {}) {
+  return JSON.stringify({
+    timestamp,
+    type: "event_msg",
+    payload: {
+      type: "token_count",
+      ...extra,
+      rate_limits: {
+        primary: { used_percent: usedPercent, window_minutes: 300, resets_at: 1778205600 },
+        secondary: { used_percent: 34, window_minutes: 10080, resets_at: 1778544000 },
+      },
+    },
+  });
+}
+
+test("collectCodexUsage reads the newest rate_limits from the file tail across chunk boundaries", () => {
+  // Regression: a long-lived Codex session rollout grew past V8's max string
+  // length, readFileSync(file, "utf8") threw, and the newest usage vanished.
+  // The collector must read backwards in bounded chunks; a tiny chunk size
+  // forces every line (with multibyte text) to straddle several chunks.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-codex-"));
+  fs.mkdirSync(path.join(dir, "sessions"), { recursive: true });
+  const noise = { last_agent_message: "中文消息 ".repeat(40) };
+  fs.writeFileSync(
+    path.join(dir, "sessions", "rollout.jsonl"),
+    [
+      codexRateLimitLine("2026-05-08T00:00:00.000Z", 11),
+      JSON.stringify({ timestamp: "2026-05-08T00:01:00.000Z", type: "event_msg", payload: { type: "task_complete", ...noise } }),
+      codexRateLimitLine("2026-05-08T00:02:00.000Z", 57, noise),
+      JSON.stringify({ timestamp: "2026-05-08T00:03:00.000Z", type: "event_msg", payload: { type: "agent_message", ...noise } }),
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const usage = collectCodexUsage(dir, { tailChunkBytes: 64 });
+  assert.equal(usage.windows[0].usedPercent, 57);
+  assert.equal(usage.observedAt, "2026-05-08T00:02:00.000Z");
+});
+
+test("collectCodexUsage skips a partially written trailing line", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-codex-"));
+  fs.mkdirSync(path.join(dir, "sessions"), { recursive: true });
+  const complete = codexRateLimitLine("2026-05-08T00:00:00.000Z", 21);
+  const partial = codexRateLimitLine("2026-05-08T00:05:00.000Z", 99).slice(0, -20);
+  fs.writeFileSync(path.join(dir, "sessions", "rollout.jsonl"), `${complete}\n${partial}`, "utf8");
+
+  const usage = collectCodexUsage(dir, { tailChunkBytes: 64 });
+  assert.equal(usage.windows[0].usedPercent, 21);
+});
+
 test("usageFromMinimaxQuota derives percent from remaining when total_count is 0", () => {
   // Real MiniMax /v1/token_plan/remains response shape: `general` model has
   // total_count=0 (credit-based plan) and exposes remaining_percent only.
@@ -615,6 +666,28 @@ test("usageFromGlmQuota identifies windows by unit/number shape, not reset order
   assert.equal(usage.windows[0].name, "five_hour");
   assert.equal(usage.windows[0].usedPercent, 42);
   assert.equal(usage.windows[1].usedPercent, 9);
+});
+
+test("usageFromGlmQuota parses CREDIT_LIMIT windows for credit-based Coding Plans", () => {
+  // Regression: Zhipu switched Coding Plan quota reporting from TOKENS_LIMIT
+  // to CREDIT_LIMIT (observed live 2026-08-29 on a Pro plan). The shapes match
+  // the old token windows (unit 3/number 5 = 5h, unit 6/number 1 = week), so
+  // credit-based plans must parse instead of failing with GLM_USAGE_MISSING.
+  const usage = usageFromGlmQuota({
+    success: true,
+    data: {
+      level: "pro",
+      limits: [
+        { type: "CREDIT_LIMIT", unit: 3, number: 5, usage: 12000, currentValue: 3974, remaining: 8025, percentage: 33, nextResetTime: 1788029747676 },
+        { type: "CREDIT_LIMIT", unit: 6, number: 1, usage: 60000, currentValue: 3974, remaining: 56025, percentage: 6, nextResetTime: 1788615889998 },
+      ],
+    },
+  }, { source: "test" });
+  assert.ok(usage);
+  assert.equal(usage.windows[0].name, "five_hour");
+  assert.equal(usage.windows[0].usedPercent, 33);
+  assert.equal(usage.windows[1].name, "seven_day");
+  assert.equal(usage.windows[1].usedPercent, 6);
 });
 
 test("usageFromGlmQuota still returns null when token windows are missing", () => {

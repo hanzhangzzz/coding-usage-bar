@@ -9,7 +9,7 @@
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg?logo=apple)](#requirements)
 
-![Coding Usage Bar showing Claude Code, Codex, GLM, DeepSeek, MiniMax, Kimi, and Qwen plan usage in the macOS menu bar](docs/assets/hero.png)
+![Coding Usage Bar showing Claude Code, Codex, GLM, DeepSeek, MiniMax, and Kimi plan usage in the macOS menu bar](docs/assets/hero.png)
 
 Coding Usage Bar does more than display quota percentages. It compares short rolling windows with the weekly budget and labels your pace as learning, under-burning, on track, over-burning, or close to a limit.
 
@@ -17,10 +17,10 @@ Claude Code and Codex data stays local and is read from files those tools alread
 
 ## Live SwiftBar Menu
 
-The screenshot is captured from the live SwiftBar plugin. The animation reproduces opening and closing that menu without altering the captured usage data.
+The menu bar title and the dropdown panel are captured from the live SwiftBar plugin and placed on a plain backdrop. The animation reproduces opening and closing that menu without altering the captured usage data.
 
 <p align="center">
-  <img src="docs/assets/demo.gif" alt="Opening the live Coding Usage Bar SwiftBar menu with Codex, Claude, GLM, DeepSeek, MiniMax, Kimi, and Qwen usage" width="800">
+  <img src="docs/assets/demo.gif" alt="Opening the live Coding Usage Bar SwiftBar menu with Codex, Claude, GLM, DeepSeek, MiniMax, and Kimi usage" width="800">
 </p>
 
 ## Quick Start
@@ -34,6 +34,12 @@ coding-usage-bar status
 `install` creates a local runtime at `~/.coding-usage-bar/app`, a user-level CLI shim at `~/.local/bin/coding-usage-bar`, a launchd agent, a default config file, and a SwiftBar menu bar plugin. Make sure `~/.local/bin` is in your `PATH`.
 
 ## Troubleshooting
+
+**Menu bar icon showing on your external display but not on the laptop?**
+
+That is a width problem, not a bug. macOS does not clip a menu bar item that is too wide -- it pushes it left, under the notch and into the app menu area, where it is simply gone. A notched 13" leaves 645pt to the right of the notch for *every* menu bar icon on the machine, and the full six-provider title alone is 511pt.
+
+Coding Usage Bar measures that space and picks a title width to fit (see [Menu Bar](#menu-bar)). Open the dropdown and read the `Title` row: its tooltip tells you how much space was measured and which width was chosen. Click the row to override.
 
 **Menu bar icon not showing after install?**
 
@@ -55,6 +61,7 @@ coding-usage-bar status
 | `coding-usage-bar status --json` | Print the same status snapshot written to `~/.coding-usage-bar/status.json` |
 | `coding-usage-bar status --refresh` | Re-collect local usage before printing status |
 | `coding-usage-bar menubar render` | Print SwiftBar-compatible menu text from `~/.coding-usage-bar/status.json` |
+| `coding-usage-bar menubar cycle-title-mode` | Cycle the menu bar title width: `auto` → `full` → `single` → `icon` |
 | `coding-usage-bar menubar install` | Install the SwiftBar plugin wrapper |
 | `coding-usage-bar menubar uninstall` | Remove the Coding Usage Bar managed SwiftBar plugin |
 | `coding-usage-bar ingest claude-statusline` | Read Claude Code status line JSON from stdin and cache usage |
@@ -215,6 +222,22 @@ The compact menu bar title and dropdown use recognizable Provider marks for Code
 {Codex icon} 5H:14%,7D:67% │ {Claude icon} 5H:24%,7D:74% │ {GLM icon} 5H:36%,7D:7%
 ```
 
+### Title width
+
+The menu bar is the scarcest space on the machine, and macOS gives no way to ask whether an item will fit. So the producer measures what is available and the title picks a width that survives it:
+
+| Tier | Width | Shows |
+|------|-------|-------|
+| `full` | ~511pt | Every provider with its own mark and bars |
+| `single` | ~68pt | Only the provider closest to trouble |
+| `icon` | ~35pt | A state-colored flame; the full title moves to the tooltip |
+
+`auto` is the default and picks a tier from the measured budget: a full-width menu bar gets `full`, a notched display gets `single`, and anything narrower falls to `icon`. The dropdown card is identical in every tier -- narrowing the title never costs you data, only a glance.
+
+The measurement runs in the daemon, never in the render path, so switching displays takes up to one collection cycle (300s) to follow. Click the `Title` row in the dropdown to cycle `auto` → `full` → `single` → `icon` and pin a width immediately.
+
+Whatever fails -- no measurement, a missing asset, a PNG error -- the title falls back to the flame icon. It never renders as nothing, because an invisible menu bar item is indistinguishable from a broken tool.
+
 SwiftBar only supports one bitmap image on a single stable title item, so Coding Usage Bar renders the full title into one transparent PNG at render time. That bitmap keeps each provider marker next to its own usage segment while avoiding SwiftBar's multi-title rotation behavior. The dropdown stays read-only and uses SwiftBar-native symbols, badges, progress meters, reset time, target range, data age, and warnings. SwiftBar is a host dependency; `coding-usage-bar uninstall` removes the Coding Usage Bar plugin but does not uninstall SwiftBar itself.
 
 ## Runtime Files
@@ -223,7 +246,8 @@ SwiftBar only supports one bitmap image on a single stable title item, so Coding
 |------|---------|
 | `~/.coding-usage-bar/app/` | Stable runtime copy used by launchd, Claude ingest hints, and SwiftBar |
 | `~/.coding-usage-bar/config.json` | Provider selection, default `["codex", "claude", "glm", "deepseek", "minimax", "kimi", "qwen"]` |
-| `~/.coding-usage-bar/status.json` | Stable display-layer entry point |
+| `~/.coding-usage-bar/status.json` | Stable display-layer entry point, including the measured menu bar budget |
+| `~/.coding-usage-bar/compact-mode` | Manual menu bar title width override; absent means `auto` |
 | `~/.coding-usage-bar/codex/latest.json` | Latest normalized Codex usage |
 | `~/.coding-usage-bar/claude/latest.json` | Latest normalized Claude usage after status line ingest |
 | `~/.coding-usage-bar/glm/latest.json` | Latest normalized GLM usage from Zhipu AI quota API |

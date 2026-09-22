@@ -205,7 +205,11 @@ function restartLaunchAgent(plistFile: string) {
 
   try {
     execFileSync("launchctl", ["bootstrap", domain, plistFile]);
-    execFileSync("launchctl", ["kickstart", "-k", `${domain}/${LAUNCHD_LABEL}`]);
+    // No -k: bootout above already SIGTERMed any old instance, so the kill arm of
+    // "kickstart -k" can never fire here — and on macOS 26 (Tahoe) a SIGKILL from
+    // kickstart -k can wedge the job in "pended nondemand spawn", silently killing
+    // all automatic scheduling for it.
+    execFileSync("launchctl", ["kickstart", `${domain}/${LAUNCHD_LABEL}`]);
     return;
   } catch {
     // Fall back to the older interface used on older macOS versions.

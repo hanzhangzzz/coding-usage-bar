@@ -1,7 +1,7 @@
 {
   "name": "coding-usage-bar",
-  "version": "0.4.1",
-  "description": "macOS menu bar usage monitor for Claude Code, Codex, GLM, DeepSeek, MiniMax, Kimi, and Qwen.",
+  "version": "0.5.1",
+  "description": "macOS menu bar usage monitor for Claude Code, Codex, GLM, DeepSeek, MiniMax, and Kimi; experimental Qwen collector.",
   "author": "hanzhangzzz",
   "license": "MIT",
   "repository": {

@@ -6,7 +6,7 @@ import { formatStatusRows, formatAnalysisDetail, formatIssues, formatProviderMet
 import { loadDisplayStatusSnapshot, collectStatusSnapshot } from "./runtime.js";
 import { runDaemonOnce } from "./daemon.js";
 import { doctorHasFailures, formatDoctor, runDoctor, runDoctorFix } from "./doctor.js";
-import { installMenuBar, renderMenuBar, uninstallMenuBar, toggleCompactMode } from "./menubar.js";
+import { installMenuBar, renderMenuBar, uninstallMenuBar, cycleTitleMode } from "./menubar.js";
 import { buildPaths } from "./paths.js";
 import { bakeGlyphAtlases } from "./glyphs.js";
 import { maybePromptForStar } from "./star.js";
@@ -27,7 +27,7 @@ Usage:
   coding-usage-bar menubar render
   coding-usage-bar menubar install [--dry-run]
   coding-usage-bar menubar uninstall [--dry-run]
-  coding-usage-bar menubar toggle-compact
+  coding-usage-bar menubar cycle-title-mode
   coding-usage-bar menubar bake-glyphs [--dry-run]
   coding-usage-bar ingest claude-statusline
   coding-usage-bar daemon [--once] [--dry-run]
@@ -130,9 +130,11 @@ async function main() {
       return;
     }
 
-    if (command === "menubar" && subcommand === "toggle-compact") {
-      const isCompact = toggleCompactMode();
-      console.log(isCompact ? "Compact" : "Expanded");
+    // `toggle-compact` is the pre-tier name for this action. A dropdown that
+    // SwiftBar rendered before the upgrade still carries it, so a click on
+    // that stale menu must keep working instead of erroring out.
+    if (command === "menubar" && (subcommand === "cycle-title-mode" || subcommand === "toggle-compact")) {
+      console.log(cycleTitleMode());
       return;
     }
 
