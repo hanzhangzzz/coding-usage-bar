@@ -114,7 +114,7 @@ Coding Usage Bar calls the Zhipu AI quota API (`GET /api/monitor/usage/quota/lim
 
 Get your API key from the [Zhipu AI console](https://open.bigmodel.cn). Without this key, GLM monitoring will report `GLM_API_KEY_MISSING`.
 
-Zhipu meters newer Coding Plans in credits (积分) instead of raw tokens and reports them as `CREDIT_LIMIT` windows. Coding Usage Bar keys off the response shape, records `quotaUnit` as `credits` or `tokens` in `status.json`, and labels the dropdown with `metered in credits` so the 5h/7d percentages read correctly for either plan generation.
+Zhipu meters newer Coding Plans in credits (积分) instead of raw tokens and reports them as `CREDIT_LIMIT` windows. Coding Usage Bar keys off the response shape, records `quotaUnit` as `credits` or `tokens` in `status.json`, and labels the dropdown with `metered in credits` so the 5h/7d percentages read correctly for either plan generation. This detection has not been verified against a real V3 (points-based) account yet; it is based on the `CREDIT_LIMIT` shape observed on existing plans. If you are on a V3 plan, a redacted `coding-usage-bar status --refresh` output in an issue would confirm it.
 
 ## DeepSeek
 

@@ -51,7 +51,7 @@ coding-usage-bar status
 - 展示层只读稳定的 `status.json`，不会在打开菜单时临时访问数据源
 - 接近限额或燃烧节奏异常时发送系统通知
 - 国产套餐规则内置：GLM Coding Plan 与 DeepSeek 的峰谷时段按北京时间计算，法定节假日按国办通知处理，CLI、下拉菜单和卡片都会显示当前是高峰还是谷时、几折、几点切换
-- GLM 新版 Coding Plan 按积分（`CREDIT_LIMIT`）计量时自动识别，标注"按积分计量"，5h/7d 百分比不会因为套餐换代而失真
+- GLM 新版 Coding Plan 按积分（`CREDIT_LIMIT`）计量时自动识别，标注"按积分计量"，5h/7d 百分比不会因为套餐换代而失真。该识别基于现有套餐观测到的 `CREDIT_LIMIT` 形状，尚未用真实 V3 积分制账号实测；V3 用户可在 issue 里贴脱敏的 `coding-usage-bar status --refresh` 输出帮助确认
 
 ## 峰谷时段
 
