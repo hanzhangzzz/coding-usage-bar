@@ -114,6 +114,8 @@ Coding Usage Bar calls the Zhipu AI quota API (`GET /api/monitor/usage/quota/lim
 
 Get your API key from the [Zhipu AI console](https://open.bigmodel.cn). Without this key, GLM monitoring will report `GLM_API_KEY_MISSING`.
 
+Zhipu meters newer Coding Plans in credits (积分) instead of raw tokens and reports them as `CREDIT_LIMIT` windows. Coding Usage Bar keys off the response shape, records `quotaUnit` as `credits` or `tokens` in `status.json`, and labels the dropdown with `metered in credits` so the 5h/7d percentages read correctly for either plan generation.
+
 ## DeepSeek
 
 Coding Usage Bar calls `GET https://api.deepseek.com/user/balance` to read your account balance. DeepSeek exposes balance rather than 5h/7d usage windows, so the menu bar shows `Available` or `Depleted` plus the currency amount. Set `deepseek.apiKey` in `~/.coding-usage-bar/config.json`:
@@ -128,6 +130,17 @@ Coding Usage Bar calls `GET https://api.deepseek.com/user/balance` to read your 
 ```
 
 Without this key, DeepSeek monitoring will report `DEEPSEEK_API_KEY_MISSING`.
+
+## Peak and off-peak pricing
+
+GLM Coding Plan and the DeepSeek API both publish a clock-based discount, and both state it in Beijing time. Coding Usage Bar computes the current tier on the producer side, stores it in `status.json` as `pricing`, and shows it in the CLI table (`price` row), the dropdown, and the usage card, together with the time of the next flip:
+
+| Provider | Peak (Asia/Shanghai) | Off-peak | Holidays |
+|---|---|---|---|
+| DeepSeek API | Mon–Fri 09:00–12:00 and 14:00–18:00 | 50% of the peak rate | Chinese public holidays are off-peak all day |
+| GLM Coding Plan | Mon–Fri 14:00–18:00 | credits deducted at 50% | Not excluded by the published rule |
+
+Sources: [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing) and the [GLM Coding Plan overview](https://docs.bigmodel.cn/cn/coding-plan/overview). The 2026 holiday table follows the State Council notice (国办发明电〔2025〕7号); adjusted working weekends stay off-peak because both vendors phrase the rule as Monday to Friday. Time-boxed promotions are not modelled. The tier only tells you what the provider charges right now; it does not change the burn analysis.
 
 ## MiniMax (M3)
 

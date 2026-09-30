@@ -66,10 +66,25 @@ export function usageBar(usedPercent: number, width = 12) {
   return `[${"#".repeat(usedCells)}${"-".repeat(width - usedCells)}] ${Math.round(usedPercent)}%`;
 }
 
+function pricingRow(usage: ProviderUsage) {
+  if (!usage.pricing) {
+    return null;
+  }
+  const tier = usage.pricing.tier === "off_peak" ? `off-peak ${usage.pricing.discountPercent}% off` : "peak, full price";
+  return [
+    providerLabel(usage.provider).padEnd(8),
+    "price".padEnd(8),
+    tier.padEnd(19),
+    formatDurationUntil(usage.pricing.until).padEnd(10),
+    usage.quotaUnit === "credits" ? "credits" : "",
+  ].join("");
+}
+
 export function formatStatusRows(usages: ProviderUsage[], analyses: BurnAnalysis[]) {
   const rows = ["Provider  Period  Usage              Reset     State"];
   for (const usage of usages) {
     const analysis = analyses.find((item) => item.provider === usage.provider);
+    const price = pricingRow(usage);
     if (usage.balance && usage.windows.length === 0) {
       const currency = usage.balance.currency === "CNY" ? "¥" : "$";
       rows.push(
@@ -81,6 +96,7 @@ export function formatStatusRows(usages: ProviderUsage[], analyses: BurnAnalysis
           analysis?.state ?? "RAW",
         ].join(""),
       );
+      if (price) rows.push(price);
       continue;
     }
     for (const window of usage.windows) {
@@ -94,6 +110,7 @@ export function formatStatusRows(usages: ProviderUsage[], analyses: BurnAnalysis
         ].join(""),
       );
     }
+    if (price) rows.push(price);
   }
   return rows.join("\n");
 }
