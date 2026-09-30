@@ -1,3 +1,4 @@
+import { deepseekPricing } from "./pricing.js";
 import { DeepseekConfig, ProviderUsage } from "./types.js";
 
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
@@ -42,11 +43,13 @@ export function usageFromDeepseekBalance(
     return null;
   }
 
+  const observedAt = options.observedAt ?? new Date().toISOString();
   return {
     provider: "deepseek",
     source: options.source,
-    observedAt: options.observedAt ?? new Date().toISOString(),
+    observedAt,
     planType: null,
+    pricing: deepseekPricing(new Date(observedAt)),
     windows: [],
     balance: {
       total: info.total_balance,

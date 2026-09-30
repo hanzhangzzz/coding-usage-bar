@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { ensureDir, isFile } from "./fs-util.js";
 import { formatProviderLabel, formatResetTime } from "./format.js";
+import { pricingLabel } from "./pricing.js";
 import { buildPaths } from "./paths.js";
 import { stableNodeExecutable } from "./node-runtime.js";
 import { loadDisplayStatusSnapshot } from "./runtime.js";
@@ -884,7 +885,9 @@ function cardProviderBlock(item: StatusSnapshot["providers"][number], now: Date)
       darkColor,
       headline: `${currency}${item.usage.balance.total}`,
       rows: [],
-      note: "Pay-as-you-go · no windowed quota",
+      note: item.usage.pricing
+        ? `Pay-as-you-go · ${pricingLabel(item.usage.pricing, formatResetTime(item.usage.pricing.until, now))}`
+        : "Pay-as-you-go · no windowed quota",
       message: null,
       updated: observedUpdatedLabel(item, now),
     };
@@ -909,7 +912,9 @@ function cardProviderBlock(item: StatusSnapshot["providers"][number], now: Date)
     darkColor,
     headline: headlinePct ? `${Math.round(headlinePct.usedPercent)}%` : STATE_LABEL[item.analysis.state],
     rows,
-    note: null,
+    note: item.usage.pricing
+      ? `${pricingLabel(item.usage.pricing, formatResetTime(item.usage.pricing.until, now))}${item.usage.quotaUnit === "credits" ? " · credits" : ""}`
+      : null,
     message: shortCardMessage(item),
     updated: observedUpdatedLabel(item, now),
   };
@@ -1029,6 +1034,9 @@ export function renderMenuBar(snapshot: StatusSnapshot = loadDisplayStatusSnapsh
           font: ROW_FONT,
           size: 12,
         }));
+        if (item.usage.pricing) {
+          lines.push(muted(pricingLabel(item.usage.pricing, formatResetTime(item.usage.pricing.until, now))));
+        }
         lines.push(line(item.analysis.message, { color: MUTED_COLOR, size: 12, length: 84 }));
         lines.push("---");
         continue;
@@ -1048,6 +1056,10 @@ export function renderMenuBar(snapshot: StatusSnapshot = loadDisplayStatusSnapsh
       }
       if (item.usage.blocked) {
         lines.push(muted(`Blocked  ${item.usage.blocked.reason}. 5h/7d numbers above still reflect the window quotas.`));
+      }
+      if (item.usage.pricing) {
+        const unit = item.usage.quotaUnit === "credits" ? " · metered in credits" : "";
+        lines.push(muted(`${pricingLabel(item.usage.pricing, formatResetTime(item.usage.pricing.until, now))}${unit}`));
       }
       lines.push(muted(targetLabel(item)));
       lines.push(line(item.analysis.message, { color: MUTED_COLOR, size: 12, length: 84 }));

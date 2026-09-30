@@ -8,6 +8,7 @@ import { collectCodexUsage } from "../dist/codex.js";
 import { collectKimiUsage, probeKimiAccessFrozen, readClaudeLanesKimiConfig, resolveKimiConfig, usageFromKimiUsages } from "../dist/kimi.js";
 import { usageFromMinimaxQuota } from "../dist/minimax.js";
 import { usageFromGlmQuota } from "../dist/glm.js";
+import { usageFromDeepseekBalance } from "../dist/deepseek.js";
 
 test("usageFromClaudeStatusLine normalizes status line rate limits", () => {
   const usage = usageFromClaudeStatusLine({
@@ -701,4 +702,46 @@ test("usageFromGlmQuota still returns null when token windows are missing", () =
     },
   }, { source: "test" });
   assert.equal(usage, null);
+});
+
+test("usageFromGlmQuota records the metering unit and a Beijing-time pricing tier", () => {
+  const observedAt = new Date(Date.UTC(2026, 8, 30, 15 - 8, 0)).toISOString(); // Wed 15:00 Asia/Shanghai
+  const credits = usageFromGlmQuota({
+    success: true,
+    data: {
+      level: "max",
+      limits: [
+        { type: "CREDIT_LIMIT", unit: 3, number: 5, percentage: 18, nextResetTime: Date.parse(observedAt) + 3_600_000 },
+        { type: "CREDIT_LIMIT", unit: 6, number: 1, percentage: 40, nextResetTime: Date.parse(observedAt) + 86_400_000 },
+      ],
+    },
+  }, { observedAt, source: "fixture" });
+  assert.equal(credits.quotaUnit, "credits");
+  assert.equal(credits.pricing.tier, "peak");
+  assert.equal(credits.pricing.timezone, "Asia/Shanghai");
+
+  const tokens = usageFromGlmQuota({
+    success: true,
+    data: {
+      level: "pro",
+      limits: [
+        { type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 1, nextResetTime: Date.parse(observedAt) + 3_600_000 },
+        { type: "TOKENS_LIMIT", unit: 6, number: 1, percentage: 2, nextResetTime: Date.parse(observedAt) + 86_400_000 },
+      ],
+    },
+  }, { observedAt: new Date(Date.UTC(2026, 8, 30, 21 - 8, 0)).toISOString(), source: "fixture" });
+  assert.equal(tokens.quotaUnit, "tokens");
+  assert.equal(tokens.pricing.tier, "off_peak");
+  assert.equal(tokens.pricing.discountPercent, 50);
+});
+
+test("usageFromDeepseekBalance attaches the holiday-aware pricing tier", () => {
+  const holidayMorning = new Date(Date.UTC(2026, 9, 1, 10 - 8, 0)).toISOString(); // Thu 10-01 10:00, National Day
+  const usage = usageFromDeepseekBalance({
+    is_available: true,
+    balance_infos: [{ currency: "CNY", total_balance: "12.30", granted_balance: "0", topped_up_balance: "12.30" }],
+  }, { observedAt: holidayMorning, source: "fixture" });
+  assert.equal(usage.pricing.tier, "off_peak");
+  assert.equal(usage.pricing.discountPercent, 50);
+  assert.equal(usage.windows.length, 0);
 });

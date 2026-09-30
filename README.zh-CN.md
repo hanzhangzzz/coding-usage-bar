@@ -50,6 +50,17 @@ coding-usage-bar status
 - Claude Code、Codex 本地优先，不依赖额外遥测服务
 - 展示层只读稳定的 `status.json`，不会在打开菜单时临时访问数据源
 - 接近限额或燃烧节奏异常时发送系统通知
+- 国产套餐规则内置：GLM Coding Plan 与 DeepSeek 的峰谷时段按北京时间计算，法定节假日按国办通知处理，CLI、下拉菜单和卡片都会显示当前是高峰还是谷时、几折、几点切换
+- GLM 新版 Coding Plan 按积分（`CREDIT_LIMIT`）计量时自动识别，标注"按积分计量"，5h/7d 百分比不会因为套餐换代而失真
+
+## 峰谷时段
+
+| Provider | 高峰（北京时间） | 谷时 | 法定节假日 |
+|---|---|---|---|
+| DeepSeek API | 周一至周五 09:00–12:00、14:00–18:00 | 高峰价的 50% | 全天谷时 |
+| GLM Coding Plan | 周一至周五 14:00–18:00 | 积分按 50% 抵扣 | 官方规则未排除，按工作日字面处理 |
+
+依据 [DeepSeek 定价页](https://api-docs.deepseek.com/quick_start/pricing)与 [GLM Coding Plan 概览](https://docs.bigmodel.cn/cn/coding-plan/overview)。2026 年节假日表来自国办发明电〔2025〕7号；调休上班的周末仍按周末处理，因为两家都把规则写成"周一至周五"。限时活动（如双节全天谷时）不建模。峰谷只说明厂商此刻怎么计费，不改变燃烧节奏分析。
 
 完整命令、Provider 配置和实现边界请查看[英文 README](README.md)。
 

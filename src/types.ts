@@ -15,11 +15,26 @@ export interface UsageWindow {
   resetsAt: string;
 }
 
+// Clock-based price tier published by the provider (DeepSeek API pricing, GLM
+// Coding Plan credits). Computed on the producer side in Asia/Shanghai; display
+// layers only read it, so the same status.json renders identically everywhere.
+export interface PricingInfo {
+  tier: "peak" | "off_peak";
+  discountPercent: number;
+  until: string;
+  timezone: string;
+  rule: string;
+}
+
 export interface ProviderUsage {
   provider: ProviderId;
   source: string;
   observedAt: string;
   planType?: string | null;
+  // GLM-only: whether the windows are metered in tokens (legacy plans) or
+  // credits/积分 (plans that report CREDIT_LIMIT). Shape-driven, not tier-driven.
+  quotaUnit?: "tokens" | "credits";
+  pricing?: PricingInfo;
   windows: UsageWindow[];
   balance?: {
     total: string;

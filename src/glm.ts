@@ -1,4 +1,5 @@
 import { makeProviderUsage, normalizeWindow } from "./usage.js";
+import { glmPricing } from "./pricing.js";
 import { GlmConfig, ProviderUsage } from "./types.js";
 
 const DEFAULT_BASE_URL = "https://open.bigmodel.cn";
@@ -68,7 +69,7 @@ function pickTokenWindowsOfType(limits: GlmLimit[]): { five: GlmLimit; seven: Gl
   return five && seven ? { five, seven } : null;
 }
 
-function pickTokenWindows(limits: GlmLimit[]): { five: GlmLimit; seven: GlmLimit } | null {
+function pickTokenWindows(limits: GlmLimit[]): { five: GlmLimit; seven: GlmLimit; unit: "tokens" | "credits" } | null {
   // Zhipu migrated Coding Plan quota reporting from TOKENS_LIMIT (token
   // counts) to CREDIT_LIMIT (credit counts, observed live 2026-08-29) with the
   // same unit/number window shapes. Prefer the token signal when both exist;
@@ -76,7 +77,7 @@ function pickTokenWindows(limits: GlmLimit[]): { five: GlmLimit; seven: GlmLimit
   for (const type of ["TOKENS_LIMIT", "CREDIT_LIMIT"]) {
     const picked = pickTokenWindowsOfType(limits.filter((limit) => limit.type === type));
     if (picked) {
-      return picked;
+      return { ...picked, unit: type === "CREDIT_LIMIT" ? "credits" : "tokens" };
     }
   }
   return null;
@@ -113,7 +114,7 @@ export function usageFromGlmQuota(
     return null;
   }
 
-  return makeProviderUsage({
+  const usage = makeProviderUsage({
     provider: "glm",
     source: options.source,
     observedAt: options.observedAt,
@@ -121,6 +122,11 @@ export function usageFromGlmQuota(
     fiveHour,
     sevenDay,
   });
+  return {
+    ...usage,
+    quotaUnit: picked.unit,
+    pricing: glmPricing(new Date(usage.observedAt)),
+  };
 }
 
 export async function collectGlmUsage(config: GlmConfig): Promise<ProviderUsage> {
