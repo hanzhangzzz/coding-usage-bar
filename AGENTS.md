@@ -77,6 +77,7 @@ Coding Usage Bar 是独立开源项目，也是本工具的唯一事实源。它
 - 测量只能在 producer 侧：AppKit 探针 ~150ms，daemon 每 300s 一次可忽略；渲染路径基线仅 330-400ms，绝不能在这里 spawn osascript/AppKit。换屏最多一个采集周期跟进，等不及走 dropdown 的 `Title` 行手动切档。
 - **不要引入 AX 方案测"别人占了多少"**：实测遍历全部 app 的 `AXExtrasMenuBar` 要 4.85s，只查单个 app 也要 1.54s，还需要辅助功能权限（SwiftBar 派生进程未必有）。已否决，勿重查。
 - 手动覆盖存于 `~/.coding-usage-bar/compact-mode`（沿用旧文件名），内容为 `full|single|icon`，文件不存在即 `auto`；空文件是升级前的 compact 标记，读作 `icon`，必须保持这个向后兼容。
+- 手动覆盖**只能往窄调，不能突破已测得的预算**（`resolveTitleTier()`）：切换档位的 `Title` 行在该 item 自己的 dropdown 里，item 被挤到刘海底下后用户无法点回来，自锁。实测案例：外接大屏时手动选 `full`，拔线回刘海屏后图标消失。预算未测得时手动选择照常生效。
 
 ## Provider usage 解析原则
 

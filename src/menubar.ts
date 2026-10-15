@@ -203,6 +203,22 @@ export function cycleTitleMode(paths: RuntimePaths = buildPaths()): TitleMode {
   return writeTitleMode(next, paths);
 }
 
+const TITLE_TIER_WIDTH_RANK: Record<TitleTier, number> = { icon: 0, single: 1, full: 2 };
+
+// A manual mode may narrow the title but never widen it past a measured budget:
+// an overflowing item is pushed under the notch, and the Title row that would
+// undo the choice lives in that item's own dropdown, so the user is locked out.
+// With no measurement the manual choice stands, since autoTier is only a guess.
+export function resolveTitleTier(mode: TitleMode, display: StatusSnapshot["display"], providerCount: number): TitleTier {
+  const autoTier = pickTitleTier(display, providerCount);
+  if (mode === "auto") {
+    return autoTier;
+  }
+  const budget = display?.extrasBudgetPt;
+  const measured = typeof budget === "number" && Number.isFinite(budget);
+  return measured && TITLE_TIER_WIDTH_RANK[mode] > TITLE_TIER_WIDTH_RANK[autoTier] ? autoTier : mode;
+}
+
 export function pickTitleTier(
   display: StatusSnapshot["display"],
   providerCount: number,
@@ -770,10 +786,13 @@ function titleLine(
     : iconLine();
 }
 
-function titleModeLabel(mode: TitleMode, autoTier: TitleTier) {
-  return mode === "auto"
-    ? `Title  Auto (${TITLE_TIER_LABEL[autoTier]})`
-    : `Title  ${TITLE_TIER_LABEL[mode]}`;
+function titleModeLabel(mode: TitleMode, autoTier: TitleTier, tier: TitleTier) {
+  if (mode === "auto") {
+    return `Title  Auto (${TITLE_TIER_LABEL[autoTier]})`;
+  }
+  return mode === tier
+    ? `Title  ${TITLE_TIER_LABEL[mode]}`
+    : `Title  ${TITLE_TIER_LABEL[mode]} (no room, ${TITLE_TIER_LABEL[tier]})`;
 }
 
 // Carries the "why" behind a degraded title without spending a menu row on it.
@@ -963,8 +982,8 @@ export function renderMenuBar(snapshot: StatusSnapshot = loadDisplayStatusSnapsh
   const providers = titleProviders(snapshot);
   const title = providers.map(titleSegment).join(` ${TITLE_SEPARATOR} `);
   const autoTier = pickTitleTier(snapshot.display, providers.length);
-  const tier: TitleTier = mode === "auto" ? autoTier : mode;
-  const modeLine = line(titleModeLabel(mode, autoTier), {
+  const tier = resolveTitleTier(mode, snapshot.display, providers.length);
+  const modeLine = line(titleModeLabel(mode, autoTier, tier), {
     bash: stableNodeExecutable(),
     param1: appCliPath(paths),
     param2: "menubar",

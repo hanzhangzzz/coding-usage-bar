@@ -385,7 +385,7 @@ test("readTitleMode reads a pre-tier compact marker as the icon tier", () => {
   assert.match(titleLine, /sfimage=flame\.fill/);
 });
 
-test("a manual title mode overrides the measured budget in both directions", () => {
+test("a manual title mode can narrow the title but never widen it past a measured budget", () => {
   const notched = {
     ...snapshot,
     display: { screenWidthPt: 1470, hasNotch: true, extrasBudgetPt: 645, measuredAt: "x" },
@@ -396,11 +396,16 @@ test("a manual title mode overrides the measured budget in both directions", () 
   writeTitleMode("full", paths);
   const forcedWide = renderMenuBar(notched, paths);
   const autoWidth = titleImageWidthPt(renderMenuBar(notched, freshPaths()));
-  assert.ok(
-    titleImageWidthPt(forcedWide) > autoWidth,
-    "manual full must win over a narrow budget",
-  );
-  assert.match(forcedWide, /Title  Full/);
+  // A full title on a notched screen would be pushed under the notch, taking
+  // the dropdown (and its Title row) with it, so the measured budget caps it.
+  assert.equal(titleImageWidthPt(forcedWide), autoWidth, "manual full must not overflow a measured budget");
+  assert.match(forcedWide, /Title  Full \(no room, Single\)/);
+
+  // With room to spare, or with no measurement at all, manual full stands.
+  const roomy = { ...snapshot, display: { screenWidthPt: 2560, hasNotch: false, extrasBudgetPt: 1960, measuredAt: "x" } };
+  assert.match(renderMenuBar(roomy, paths), /Title  Full \|/);
+  const unmeasured = { ...snapshot, display: undefined };
+  assert.ok(titleImageWidthPt(renderMenuBar(unmeasured, paths)) > autoWidth, "unmeasured budget keeps manual full");
 
   writeTitleMode("icon", paths);
   const forcedIcon = renderMenuBar(snapshot, paths);
