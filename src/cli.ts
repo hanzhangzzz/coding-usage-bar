@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { usageFromClaudeStatusLine, readStdin } from "./claude.js";
+import { mergeClaudeUsage, usageFromClaudeStatusLine, readStdin } from "./claude.js";
 import { install, uninstall } from "./install.js";
-import { saveUsage } from "./store.js";
+import { loadLatestUsage, writeUsageSnapshot } from "./store.js";
 import { formatStatusRows, formatAnalysisDetail, formatIssues, formatProviderMeta } from "./format.js";
 import { loadDisplayStatusSnapshot, collectStatusSnapshot } from "./runtime.js";
 import { runDaemonOnce } from "./daemon.js";
@@ -147,9 +147,13 @@ async function main() {
       const input = await readStdin();
       const parsed = JSON.parse(input);
       const usage = usageFromClaudeStatusLine(parsed);
-      saveUsage(usage);
+      // Concurrent sessions all ingest into the same latest.json slot;
+      // merge conservatively for display while the sample keeps the raw
+      // per-session numbers.
+      const merged = mergeClaudeUsage(loadLatestUsage("claude"), usage);
+      writeUsageSnapshot(merged, usage);
       try {
-        updateStatusSnapshotUsage(usage);
+        updateStatusSnapshotUsage(merged);
       } catch {
         // The provider cache is authoritative. A later daemon run can rebuild
         // status.json if this best-effort display update loses lock contention.

@@ -19,12 +19,56 @@ export function usageFromClaudeStatusLine(input: unknown): ProviderUsage {
     throw new Error("Claude usage unavailable: missing five_hour or seven_day rate limit window");
   }
 
+  const sessionId = asNonEmptyString(record.session_id);
+  const model = record.model as Record<string, unknown> | undefined;
+  const modelLabel =
+    asNonEmptyString(model?.display_name) ?? asNonEmptyString(model?.id);
+
   return makeProviderUsage({
     provider: "claude",
     source: "claude_statusline_stdin",
+    sessionId,
+    model: modelLabel,
     fiveHour,
     sevenDay,
   });
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+// Every Claude Code session that renders the status line runs the ingest, so
+// latest.json has multiple concurrent writers. Their rate limit views can
+// diverge for minutes -- a blocked session already reports 100% while another
+// still holds an older snapshot (observed flapping 100% <-> 23% inside one
+// window). Within one resetsAt window server-side usage only grows, so a
+// lower percent for the same window is a stale view from another session:
+// keep the maximum until the window itself rolls (resetsAt changes). The
+// merged record keeps the incoming session's attribution and observedAt --
+// freshness follows the newest write, while samples.jsonl retains each
+// session's raw numbers.
+export function mergeClaudeUsage(
+  previous: ProviderUsage | null,
+  incoming: ProviderUsage,
+): ProviderUsage {
+  if (!previous) {
+    return incoming;
+  }
+  const windows = incoming.windows.map((window) => {
+    const prior = previous.windows.find(
+      (candidate) =>
+        candidate.name === window.name && candidate.resetsAt === window.resetsAt,
+    );
+    if (!prior) {
+      return window;
+    }
+    return {
+      ...window,
+      usedPercent: Math.max(prior.usedPercent, window.usedPercent),
+    };
+  });
+  return { ...incoming, windows };
 }
 
 export function readStdin(): Promise<string> {

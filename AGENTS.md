@@ -36,6 +36,14 @@ Coding Usage Bar 是独立开源项目，也是本工具的唯一事实源。它
 - `coding-usage-bar status` 默认读取 `~/.coding-usage-bar/status.json`；只有 `--refresh`、`--fixtures` 或 daemon 才应触发本机 usage 采集。
 - Menu Bar v1 使用 SwiftBar 插件作为薄展示层：`coding-usage-bar menubar render` 只读 `status.json`，`coding-usage-bar menubar install` 只安装 wrapper 插件，不采集 provider 数据。`coding-usage-bar uninstall` 只删除本工具管理的插件，不卸载 SwiftBar 本体。
 
+## 已知踩坑：Claude statusline ingest 是多会话单槽
+
+- 多个 Claude Code 会话同时渲染 status line，就会有多个进程并发执行 `ingest claude-statusline` 写同一个 `latest.json`。不同会话的 `rate_limits` 视图可能滞后数分钟：打满的会话已是 100%，另一个会话还停在旧值（实测同窗口内 100%↔23% 横跳）。
+- 同一 `resetsAt` 窗口内服务端用量单调不减，usedPercent 下降只能来自另一个会话的滞后视图。ingest 必须经 `mergeClaudeUsage` 对同窗口保守取 max，只有 `resetsAt` 变化（窗口翻滚）才接受低值；禁止回退成裸 last-writer-wins。
+- `samples.jsonl` 记录每次 ingest 的原始样本（含 `sessionId`/`model` 归属），`latest.json` 才存合并值（`writeUsageSnapshot` 的 latest/sample 分离）；不要把 merged 值写进 samples。
+- payload 缺 `rate_limits`（如走第三方 base url 的会话）会让 ingest 以 rc=1 失败，这是预期行为：不要为它造 0% 兜底，也不要让它影响已存的 latest.json。
+- 回归测试必须覆盖：同窗口低值不回落、窗口翻滚接受新值、无 previous 直通、latest 与样本分离。
+
 ## 已知踩坑：展示层不能越权采集
 
 - 不要为了“实时”让 `coding-usage-bar status`、`coding-usage-bar menubar render`、SwiftBar 渲染函数或未来 GUI 直接读取 `~/.codex`、Claude status line cache 之外的原始源。
