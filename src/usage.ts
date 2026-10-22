@@ -64,6 +64,8 @@ export function makeProviderUsage(input: {
   source: string;
   observedAt?: string;
   planType?: string | null;
+  sessionId?: string | null;
+  model?: string | null;
   fiveHour: UsageWindow;
   sevenDay: UsageWindow;
 }): ProviderUsage {
@@ -72,6 +74,10 @@ export function makeProviderUsage(input: {
     source: input.source,
     observedAt: input.observedAt ?? new Date().toISOString(),
     planType: input.planType ?? null,
+    // Only emitted when the caller actually carries attribution, so other
+    // providers' serialized shapes stay byte-identical.
+    ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+    ...(input.model !== undefined ? { model: input.model } : {}),
     windows: [input.fiveHour, input.sevenDay],
   };
 }

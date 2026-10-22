@@ -7,8 +7,20 @@ export function saveUsage(
   usage: ProviderUsage,
   paths: RuntimePaths = buildPaths(),
 ) {
-  writeJsonAtomic(providerLatestPath(paths, usage.provider), usage);
-  appendJsonLine(providerSamplesPath(paths, usage.provider), usage);
+  writeUsageSnapshot(usage, usage, paths);
+}
+
+// latest.json holds the value display layers should show, samples.jsonl the
+// raw per-ingest sample. For Claude these differ: concurrent sessions ingest
+// divergent rate limit views, so the caller merges conservatively for latest
+// while the sample keeps what that session actually reported.
+export function writeUsageSnapshot(
+  latest: ProviderUsage,
+  sample: ProviderUsage,
+  paths: RuntimePaths = buildPaths(),
+) {
+  writeJsonAtomic(providerLatestPath(paths, latest.provider), latest);
+  appendJsonLine(providerSamplesPath(paths, sample.provider), sample);
 }
 
 export function loadLatestUsage(

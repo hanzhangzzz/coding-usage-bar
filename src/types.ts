@@ -31,6 +31,12 @@ export interface ProviderUsage {
   source: string;
   observedAt: string;
   planType?: string | null;
+  // Claude-only: which status line session produced this sample. Concurrent
+  // Claude Code sessions hold divergent rate limit views; samples.jsonl keeps
+  // the raw per-session numbers while latest.json keeps the conservative
+  // merge (mergeClaudeUsage), so attribution matters for post-hoc diagnosis.
+  sessionId?: string | null;
+  model?: string | null;
   // GLM-only: whether the windows are metered in tokens (legacy plans) or
   // credits/积分 (plans that report CREDIT_LIMIT). Shape-driven, not tier-driven.
   quotaUnit?: "tokens" | "credits";

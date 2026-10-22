@@ -3,12 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { usageFromClaudeStatusLine } from "../dist/claude.js";
+import { mergeClaudeUsage, usageFromClaudeStatusLine } from "../dist/claude.js";
 import { collectCodexUsage } from "../dist/codex.js";
 import { collectKimiUsage, probeKimiAccessFrozen, readClaudeLanesKimiConfig, resolveKimiConfig, usageFromKimiUsages } from "../dist/kimi.js";
 import { usageFromMinimaxQuota } from "../dist/minimax.js";
 import { usageFromGlmQuota } from "../dist/glm.js";
 import { usageFromDeepseekBalance } from "../dist/deepseek.js";
+import { writeUsageSnapshot, loadLatestUsage, loadSamples } from "../dist/store.js";
+import { buildPaths } from "../dist/paths.js";
 
 test("usageFromClaudeStatusLine normalizes status line rate limits", () => {
   const usage = usageFromClaudeStatusLine({
@@ -25,6 +27,107 @@ test("usageFromClaudeStatusLine normalizes status line rate limits", () => {
 
 test("usageFromClaudeStatusLine rejects missing usage", () => {
   assert.throws(() => usageFromClaudeStatusLine({}), /rate_limits/);
+});
+
+test("usageFromClaudeStatusLine keeps session attribution", () => {
+  const usage = usageFromClaudeStatusLine({
+    session_id: "session-a",
+    model: { id: "claude-sonnet-4-5", display_name: "Sonnet 4.5" },
+    rate_limits: {
+      five_hour: { used_percentage: 42, resets_at: "2026-05-08T02:00:00Z" },
+      seven_day: { used_percentage: 18, resets_at: "2026-05-12T00:00:00Z" },
+    },
+  });
+
+  assert.equal(usage.sessionId, "session-a");
+  assert.equal(usage.model, "Sonnet 4.5");
+});
+
+const claudeUsageBase = {
+  provider: "claude",
+  source: "claude_statusline_stdin",
+};
+
+test("mergeClaudeUsage keeps the higher percent inside the same window", () => {
+  const previous = {
+    ...claudeUsageBase,
+    observedAt: "2026-10-21T08:00:00.000Z",
+    windows: [
+      { name: "five_hour", windowMinutes: 300, usedPercent: 100, resetsAt: "2026-10-21T13:00:00.000Z" },
+      { name: "seven_day", windowMinutes: 10080, usedPercent: 40, resetsAt: "2026-10-24T13:00:00.000Z" },
+    ],
+  };
+  const incoming = {
+    ...claudeUsageBase,
+    observedAt: "2026-10-21T09:13:00.000Z",
+    windows: [
+      { name: "five_hour", windowMinutes: 300, usedPercent: 23, resetsAt: "2026-10-21T13:00:00.000Z" },
+      { name: "seven_day", windowMinutes: 10080, usedPercent: 35, resetsAt: "2026-10-24T13:00:00.000Z" },
+    ],
+  };
+
+  const merged = mergeClaudeUsage(previous, incoming);
+
+  assert.equal(merged.windows[0].usedPercent, 100);
+  assert.equal(merged.windows[1].usedPercent, 40);
+  assert.equal(merged.observedAt, incoming.observedAt);
+});
+
+test("mergeClaudeUsage follows the window when it rolls over", () => {
+  const previous = {
+    ...claudeUsageBase,
+    observedAt: "2026-10-21T09:52:00.000Z",
+    windows: [
+      { name: "five_hour", windowMinutes: 300, usedPercent: 100, resetsAt: "2026-10-21T13:00:00.000Z" },
+    ],
+  };
+  const incoming = {
+    ...claudeUsageBase,
+    observedAt: "2026-10-21T13:01:15.000Z",
+    windows: [
+      { name: "five_hour", windowMinutes: 300, usedPercent: 4, resetsAt: "2026-10-21T18:00:00.000Z" },
+    ],
+  };
+
+  assert.equal(mergeClaudeUsage(previous, incoming).windows[0].usedPercent, 4);
+});
+
+test("mergeClaudeUsage passes incoming through without previous", () => {
+  const incoming = {
+    ...claudeUsageBase,
+    observedAt: "2026-10-21T13:01:15.000Z",
+    windows: [
+      { name: "five_hour", windowMinutes: 300, usedPercent: 4, resetsAt: "2026-10-21T18:00:00.000Z" },
+    ],
+  };
+
+  assert.equal(mergeClaudeUsage(null, incoming).windows[0].usedPercent, 4);
+});
+
+test("writeUsageSnapshot stores merged latest but raw sample", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "coding-usage-bar-store-"));
+  const paths = buildPaths(home);
+  const window = (usedPercent, resetsAt) => ({
+    name: "five_hour",
+    windowMinutes: 300,
+    usedPercent,
+    resetsAt,
+  });
+  const merged = {
+    ...claudeUsageBase,
+    observedAt: "2026-10-21T09:13:00.000Z",
+    windows: [window(100, "2026-10-21T13:00:00.000Z")],
+  };
+  const raw = {
+    ...claudeUsageBase,
+    observedAt: "2026-10-21T09:13:00.000Z",
+    windows: [window(23, "2026-10-21T13:00:00.000Z")],
+  };
+
+  writeUsageSnapshot(merged, raw, paths);
+
+  assert.equal(loadLatestUsage("claude", paths).windows[0].usedPercent, 100);
+  assert.equal(loadSamples("claude", paths)[0].windows[0].usedPercent, 23);
 });
 
 test("collectCodexUsage reads latest payload.rate_limits from jsonl", () => {
